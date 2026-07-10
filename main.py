@@ -54,6 +54,7 @@ from actions.computer_control  import computer_control
 from actions.game_updater      import game_updater
 from actions.system_monitor    import SystemMonitor, get_system_status
 from actions.proactive         import ProactiveEngine
+from actions.database_manager   import database_manager
 
 
 def get_base_dir():
@@ -243,6 +244,23 @@ TOOL_DECLARATIONS = [
                 "value":       {"type": "STRING", "description": "Optional value: volume level, text to type, etc."}
             },
             "required": []
+        }
+    },
+    {
+        "name": "database_manager",
+        "description": (
+            "Manages the Neon PostgreSQL database. Use for: listing tables, "
+            "getting table schemas, and executing SQL queries (SELECT, INSERT, UPDATE, DELETE). "
+            "Essential for interacting with Project ASC data."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":     {"type": "STRING", "description": "query | list_tables | get_schema"},
+                "query":      {"type": "STRING", "description": "The SQL query to execute (query action)"},
+                "table_name": {"type": "STRING", "description": "Table name for get_schema action"},
+            },
+            "required": ["action"]
         }
     },
     {
@@ -685,6 +703,10 @@ class JarvisLive:
 
             elif name == "browser_control":
                 r = await loop.run_in_executor(None, lambda: browser_control(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "database_manager":
+                r = await loop.run_in_executor(None, lambda: database_manager(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "file_controller":
