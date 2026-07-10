@@ -3,6 +3,7 @@ google-genai
 google-generativeai
 pillow
 requests
+psycopg2-binary
 beautifulsoup4
 duckduckgo-search
 playwright

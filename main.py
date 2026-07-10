@@ -250,13 +250,14 @@ TOOL_DECLARATIONS = [
         "name": "database_manager",
         "description": (
             "Manages the Neon PostgreSQL database. Use for: listing tables, "
-            "getting table schemas, and executing SQL queries (SELECT, INSERT, UPDATE, DELETE). "
-            "Essential for interacting with Project ASC data."
+            "describing the database schema, getting table schemas, and executing SQL queries "
+            "(SELECT, INSERT, UPDATE, DELETE). Essential for interacting with Project ASC data. "
+            "For natural-language questions about stored Project ASC data, call this tool."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action":     {"type": "STRING", "description": "query | list_tables | get_schema"},
+                "action":     {"type": "STRING", "description": "query | list_tables | describe_database | get_schema"},
                 "query":      {"type": "STRING", "description": "The SQL query to execute (query action)"},
                 "table_name": {"type": "STRING", "description": "Table name for get_schema action"},
             },
