@@ -29,11 +29,23 @@ def _get_api_key() -> str:
         return json.load(f)["gemini_api_key"]
     
 def _get_desktop() -> Path:
+    """Get the active desktop path, with OneDrive awareness for Windows."""
     if _OS == "Linux":
         xdg = os.environ.get("XDG_DESKTOP_DIR", "")
         if xdg and Path(xdg).exists():
             return Path(xdg)
-    return Path.home() / "Desktop"
+    
+    desktop = Path.home() / "Desktop"
+    
+    if _OS == "Windows":
+        # Check for OneDrive Desktop
+        onedrive = os.environ.get("ONEDRIVE")
+        if onedrive:
+            od_desktop = Path(onedrive) / "Desktop"
+            if od_desktop.exists():
+                return od_desktop
+                
+    return desktop
 
 def _build_sandbox() -> dict:
     import time

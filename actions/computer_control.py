@@ -1,6 +1,7 @@
 #computer_control.py
 import io
 import json
+import os
 import platform
 import re
 import string
@@ -57,17 +58,34 @@ def _get_os() -> str:
 def _get_api_key() -> str:
     return _load_config().get("gemini_api_key", "")
 
+def _get_active_desktop() -> Path:
+    """Helper to get the actual desktop path (OneDrive aware)."""
+    desktop = Path.home() / "Desktop"
+    if platform.system() == "Windows":
+        onedrive = os.environ.get("ONEDRIVE")
+        if onedrive:
+            od_desktop = Path(onedrive) / "Desktop"
+            if od_desktop.exists():
+                return od_desktop
+    return desktop
+
 _SAFE_SCREENSHOT_ROOTS = (
     Path.home(),
 )
 
 def _safe_screenshot_path(requested: str | None) -> Path:
-    fallback = Path.home() / "Desktop" / "jarvis_screenshot.png"
+    fallback = _get_active_desktop() / "jarvis_screenshot.png"
     if not requested:
         return fallback
     try:
         p = Path(requested).expanduser().resolve()
-        for root in _SAFE_SCREENSHOT_ROOTS:
+        # Add the active desktop to safe roots if not already covered by Path.home()
+        safe_roots = list(_SAFE_SCREENSHOT_ROOTS)
+        active_desktop = _get_active_desktop()
+        if not any(active_desktop.is_relative_to(root.resolve()) for root in safe_roots):
+            safe_roots.append(active_desktop)
+            
+        for root in safe_roots:
             if p.is_relative_to(root.resolve()):
                 p.parent.mkdir(parents=True, exist_ok=True)
                 return p
@@ -255,6 +273,26 @@ def _clear_field() -> str:
     pyautogui.press("delete")
     return "Field cleared"
 
+def _create_folder(folder_name: str) -> str:
+    """Create a folder on the desktop, with OneDrive awareness for Windows."""
+    try:
+        # 1. Try standard Desktop
+        desktop = Path.home() / "Desktop"
+        
+        # 2. On Windows, check for OneDrive Desktop (common in university/corporate envs)
+        if platform.system() == "Windows":
+            onedrive = os.environ.get("ONEDRIVE")
+            if onedrive:
+                od_desktop = Path(onedrive) / "Desktop"
+                if od_desktop.exists():
+                    desktop = od_desktop
+        
+        new_dir = desktop / folder_name
+        new_dir.mkdir(parents=True, exist_ok=True)
+        return f"Folder created on desktop: {new_dir}"
+    except Exception as e:
+        return f"Failed to create folder: {e}"
+
 def _focus_window(title: str) -> str:
     os_name = _get_os()
 
@@ -361,6 +399,7 @@ def computer_control(
     response=None,
     player=None,
     session_memory=None,
+    perception=None,
 ) -> str:
     """
     Dispatch table for all computer control actions.
@@ -403,6 +442,7 @@ def computer_control(
       screen_click  — AI element finder + click
       random_data   — generate fake form data
       user_data     — pull real data from memory
+      create_folder — create a folder on the desktop
     """
     params = parameters or {}
     action = params.get("action", "").lower().strip()
@@ -468,15 +508,26 @@ def computer_control(
             return _screenshot(params.get("path"))
 
         if action == "screen_find":
-            coords = _screen_find(params.get("description", ""))
+            desc = params.get("description", "")
+            if perception:
+                coords = perception.find_element(desc)
+            else:
+                coords = _screen_find(desc)
             return f"{coords[0]},{coords[1]}" if coords else "NOT_FOUND"
 
         if action == "screen_click":
-            desc   = params.get("description", "")
-            coords = _screen_find(desc)
+            desc = params.get("description", "")
+            if perception:
+                coords = perception.find_element(desc)
+            else:
+                coords = _screen_find(desc)
+                
             if coords:
                 time.sleep(0.2)
                 _click(x=coords[0], y=coords[1])
+                # After action, wait for UI to update
+                if perception:
+                    time.sleep(1.0)
                 return f"Clicked '{desc}' at {coords}"
             return f"Element not found on screen: '{desc}'"
 
@@ -506,6 +557,9 @@ def computer_control(
                 value = _random_data(field)
                 print(f"[ComputerControl] ⚠️ No '{field}' in memory, using random: {value}")
             return value
+
+        if action == "create_folder":
+            return _create_folder(params.get("text", "New Folder"))
 
         return f"Unknown action: '{action}'"
 

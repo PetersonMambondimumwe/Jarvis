@@ -113,10 +113,26 @@ def _capture_screen() -> tuple[bytes, str]:
         raise RuntimeError("mss is not installed. Run: pip install mss")
 
     with mss.mss() as sct:
-        monitors = sct.monitors          # [0] = all combined, [1..n] = real screens
-        target   = monitors[1] if len(monitors) > 1 else monitors[0]
-        shot     = sct.grab(target)
-        png      = mss.tools.to_png(shot.rgb, shot.size)
+        # monitors[0] is the bounding box of all monitors (virtual screen).
+        # monitors[1:] are individual physical monitors.
+        # On Windows, monitors[1] is usually the primary, but not always.
+        monitors = sct.monitors
+        
+        # We'll try to find the primary monitor by checking which one is at (0,0)
+        # or just default to monitors[1] if available, otherwise monitors[0].
+        primary_monitor = None
+        if len(monitors) > 1:
+            for m in monitors[1:]:
+                if m["left"] == 0 and m["top"] == 0:
+                    primary_monitor = m
+                    break
+            if not primary_monitor:
+                primary_monitor = monitors[1]
+        else:
+            primary_monitor = monitors[0]
+            
+        shot = sct.grab(primary_monitor)
+        png  = mss.tools.to_png(shot.rgb, shot.size)
 
     return _compress(png, "PNG")
 

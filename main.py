@@ -55,6 +55,7 @@ from actions.game_updater      import game_updater
 from actions.system_monitor    import SystemMonitor, get_system_status
 from actions.proactive         import ProactiveEngine
 from actions.database_manager   import database_manager
+from core.perception_engine     import PerceptionEngine
 
 
 def get_base_dir():
@@ -527,7 +528,7 @@ TOOL_DECLARATIONS = [
                     )
                 },
                 "key":   {"type": "STRING", "description": "Short snake_case key (e.g. name, favorite_food, sister_name)"},
-                "value": {"type": "STRING", "description": "Concise value in English (e.g. Fatih, pizza, older sister)"},
+                "value": {"type": "STRING", "description": "Concise value in English (e.g. Peterson, pizza, older sister)"},
             },
             "required": ["category", "key", "value"]
         }
@@ -562,6 +563,7 @@ class JarvisLive:
         self._briefing_sent    = False          # morning briefing fires once per process
         self._sys_monitor      = SystemMonitor()  # persistent cooldown state
         self._proactive        = ProactiveEngine()
+        self._perception       = PerceptionEngine(api_key=_get_api_key(), player=self.ui)
         self._last_user_speech = time.monotonic()  # updated on every user utterance
 
     def _make_remote_key(self):
@@ -695,7 +697,10 @@ class JarvisLive:
 
         try:
             if name == "open_app":
-                r = await loop.run_in_executor(None, lambda: open_app(parameters=args, response=None, player=self.ui))
+                r = await loop.run_in_executor(
+                    None, 
+                    lambda: open_app(parameters=args, response=None, player=self.ui, perception=self._perception)
+                )
                 result = r or f"Opened {args.get('app_name')}."
 
             elif name == "weather_report":
@@ -748,6 +753,9 @@ class JarvisLive:
                     else:
                         img_b, mime_t = await loop.run_in_executor(None, _capture_screen)
                         print(f"[Vision] 🖥️  Screen: {len(img_b):,} bytes")
+                        # Visual feedback: show the captured screen frame in the UI
+                        if hasattr(self.ui, "show_camera_frame"):
+                            self.ui.show_camera_frame(img_b)
                         _stall = "screen"
                     self._pending_vision = (img_b, mime_t, user_text, angle)
                     result = (
@@ -797,7 +805,10 @@ class JarvisLive:
                 result = r or "Done."
 
             elif name == "computer_control":
-                r = await loop.run_in_executor(None, lambda: computer_control(parameters=args, player=self.ui))
+                r = await loop.run_in_executor(
+                    None, 
+                    lambda: computer_control(parameters=args, player=self.ui, perception=self._perception)
+                )
                 result = r or "Done."
 
             elif name == "game_updater":
@@ -1269,6 +1280,7 @@ class JarvisLive:
                     tg.create_task(self._play_audio())
                     tg.create_task(self._run_system_monitor())
                     tg.create_task(self._run_proactive_mode())
+                    self._perception.start()
                     if self._dashboard:
                         tg.create_task(self._relay_phone_audio())
 

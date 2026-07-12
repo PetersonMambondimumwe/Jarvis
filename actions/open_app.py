@@ -226,6 +226,7 @@ def open_app(
     response=None,
     player=None,
     session_memory=None,
+    perception=None,
 ) -> str:
     app_name = (parameters or {}).get("app_name", "").strip()
 
@@ -244,6 +245,9 @@ def open_app(
 
     try:
         if launcher(normalized):
+            if perception:
+                time.sleep(2.0)
+                perception._deep_analysis()
             return f"Opened {app_name}."
         if normalized.lower() != app_name.lower():
             if launcher(app_name):

@@ -28,11 +28,24 @@ def _is_safe_path(target: Path) -> bool:
         return False
 
 def _get_desktop() -> Path:
+    """Get the active desktop path, with OneDrive awareness for Windows."""
     if _OS == "Linux":
         xdg = os.environ.get("XDG_DESKTOP_DIR", "")
         if xdg and Path(xdg).exists():
             return Path(xdg)
-    return Path.home() / "Desktop"
+    
+    desktop = Path.home() / "Desktop"
+    
+    if _OS == "Windows":
+        # Check for OneDrive Desktop - try specific OneDrive env vars first
+        for env_var in ["ONEDRIVE", "OneDriveCommercial", "OneDriveConsumer"]:
+            od_path = os.environ.get(env_var)
+            if od_path:
+                od_desktop = Path(od_path) / "Desktop"
+                if od_desktop.exists():
+                    return od_desktop
+                
+    return desktop
 
 def _get_downloads() -> Path:
     if _OS == "Linux":

@@ -1,7 +1,7 @@
 # ⚙️ MARK XLVIII (48)
-### The Ultimate Cross-Platform Personal AI Assistant — By FatihMakes
+### The Ultimate Cross-Platform Personal AI Assistant — By Sir Peterson
 
-> 📺 **[Watch the full setup video on YouTube](https://www.youtube.com/@FatihMakes)**
+> 📺 **[Watch the full setup video on YouTube](https://www.youtube.com/@SirPeterson)**
 
 A real-time voice AI that can hear, see, understand, and control your computer — on any OS. Supports Windows, macOS, and Linux. Built on the Gemini Live API for native audio streaming, delivering zero subscriptions and total digital autonomy.
 
@@ -82,7 +82,7 @@ All transient vision and interrupt flags (`_pending_vision`, `_vision_busy`, `_v
 ## ⚡ Quick Start
 
 ```bash
-git clone https://github.com/FatihMakes/Mark-XLVIII.git
+git clone https://github.com/SirPeterson/Mark-XLVIII.git
 cd Mark-XLVIII
 pip install -r requirements.txt
 python main.py
@@ -153,5 +153,5 @@ Engineered by a developer building a real-world JARVIS-style assistant.
 
 | Platform | Link |
 | --- | --- |
-| YouTube | [@FatihMakes](https://www.youtube.com/@FatihMakes) |
-| Instagram | [@fatihmakes](https://www.instagram.com/fatihmakes) |
+| YouTube | [@SirPeterson](https://www.youtube.com/@SirPeterson) |
+| Instagram | [@sirpeterson](https://www.instagram.com/sirpeterson) |
