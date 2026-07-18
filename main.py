@@ -55,7 +55,9 @@ from actions.game_updater      import game_updater
 from actions.system_monitor    import SystemMonitor, get_system_status
 from actions.proactive         import ProactiveEngine
 from actions.database_manager   import database_manager
+from actions.edith_agent        import edith_agent
 from core.perception_engine     import PerceptionEngine
+from core.task_manager          import TaskManager
 
 
 def get_base_dir():
@@ -504,6 +506,25 @@ TOOL_DECLARATIONS = [
     }
 },
     {
+        "name": "edith_agent",
+        "description": (
+            "Delegates complex or specialized tasks to EDITH, the Base44 AI Agent. "
+            "Use this when the user mentions EDITH, or when you need a specialized "
+            "agent to handle backend projects, data orchestration, or persistent AI skills."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "delegate | verify. Use verify to test EDITH/Base44 connectivity."
+                },
+                "task": {"type": "STRING", "description": "The detailed task or message for EDITH"}
+            },
+            "required": ["task"]
+        }
+    },
+    {
         "name": "save_memory",
         "description": (
             "Save an important personal fact about the user to long-term memory. "
@@ -564,6 +585,7 @@ class JarvisLive:
         self._sys_monitor      = SystemMonitor()  # persistent cooldown state
         self._proactive        = ProactiveEngine()
         self._perception       = PerceptionEngine(api_key=_get_api_key(), player=self.ui)
+        self.task_manager     = TaskManager(player=self.ui, speak_callback=self.speak)
         self._last_user_speech = time.monotonic()  # updated on every user utterance
 
     def _make_remote_key(self):
@@ -819,6 +841,13 @@ class JarvisLive:
                 r = await loop.run_in_executor(None, lambda: flight_finder(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "edith_agent":
+                r = await loop.run_in_executor(
+                    None,
+                    lambda: edith_agent(parameters=args, player=self.ui, session_memory=getattr(self, "_session_memory", {}), task_manager=self.task_manager)
+                )
+                result = r or "Task delegated to EDITH."
+
             elif name == "system_status":
                 r = await loop.run_in_executor(None, get_system_status)
                 result = str(r)
@@ -850,6 +879,8 @@ class JarvisLive:
         )
 
     async def _send_realtime(self):
+        # Start the task manager polling loop when Jarvis starts
+        self.task_manager.start_polling()
         while True:
             msg = await self.out_queue.get()
             await self.session.send_realtime_input(media=msg)
@@ -1330,6 +1361,7 @@ class JarvisLive:
                     self._conn_backoff = 3
             finally:
                 self.session = None
+                self.task_manager.stop_polling()
 
             self.set_speaking(False)
             self.ui.set_state("SLEEPING")
