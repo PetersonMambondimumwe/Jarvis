@@ -1,5 +1,5 @@
 // JARVIS PWA Service Worker
-const CACHE_NAME = 'jarvis-pwa-v3';
+const CACHE_NAME = 'jarvis-pwa-v4';
 const ASSETS = [
   '/',
   '/login',
@@ -30,6 +30,14 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname.startsWith('/ws') || url.pathname.startsWith('/api')) return;
 
   e.respondWith(
-    fetch(e.request).catch(() => caches.match(e.request))
+    fetch(e.request).catch(async () => {
+      const cached = await caches.match(e.request);
+      if (cached) return cached;
+      if (e.request.mode === 'navigate') {
+        const fallback = await caches.match('/');
+        if (fallback) return fallback;
+      }
+      return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
+    })
   );
 });
