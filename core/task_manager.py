@@ -11,13 +11,21 @@ import requests
 # We'll use absolute imports to avoid issues when running from main.py
 try:
     from memory.memory_manager import load_memory
-    from actions.edith_agent import _load_edith_config, _headers, _json_or_text, _handle_http_error, _latest_assistant_text, EdithConfig, EdithConfigError
+    from actions.edith_agent import (
+        _load_edith_config, _headers, _json_or_text, _handle_http_error, 
+        _latest_assistant_text, EdithConfig, EdithConfigError,
+        _post_agent_message, _build_payload, _response_text
+    )
 except ImportError:
     # Fallback for direct module testing
     import sys
     sys.path.append(str(Path(__file__).parent.parent))
     from memory.memory_manager import load_memory
-    from actions.edith_agent import _load_edith_config, _headers, _json_or_text, _handle_http_error, _latest_assistant_text, EdithConfig, EdithConfigError
+    from actions.edith_agent import (
+        _load_edith_config, _headers, _json_or_text, _handle_http_error, 
+        _latest_assistant_text, EdithConfig, EdithConfigError,
+        _post_agent_message, _build_payload, _response_text
+    )
 
 
 class TaskManager:
@@ -130,14 +138,17 @@ class TaskManager:
         self._log(f"Notification: {report}")
         
         # If we have a speak callback (JarvisLive.speak), use it
-        if self.speak_callback:
-            if asyncio.iscoroutinefunction(self.speak_callback):
-                await self.speak_callback(report)
-            else:
-                self.speak_callback(report)
-        elif self.player:
-            # Fallback to UI log if voice is not available
-            self.player.write_log(f"[EDITH REPORT] {report}")
+        try:
+            if self.speak_callback:
+                if asyncio.iscoroutinefunction(self.speak_callback):
+                    await self.speak_callback(report)
+                else:
+                    self.speak_callback(report)
+            elif self.player:
+                # Fallback to UI log if voice is not available
+                self.player.write_log(f"[EDITH REPORT] {report}")
+        except Exception as e:
+            self._log(f"Error delivering notification: {e}")
 
     async def _run_polling_loop(self):
         self._log("Background polling loop started.")
@@ -200,6 +211,139 @@ class TaskManager:
         self._log(f"New task registered: {task_id} (conv: {conversation_id})")
         self.start_polling()
         return task_id
+
+    def delegate_task_async(
+        self,
+        task_description: str,
+        conversation_id: str,
+        edith_config: EdithConfig,
+        task: str,
+        session_memory: dict | None = None
+    ) -> str:
+        """Register a delegated EDITH task and start background message posting."""
+        task_id = str(uuid.uuid4())[:8]
+        self.tasks[task_id] = {
+            "task_description": task_description,
+            "conversation_id": conversation_id,
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "retries": 0,
+            "last_update": None,
+            "result": None,
+            # Block regular polling for this task until the background poster
+            # completes the initial message submission.
+            "next_poll_time": time.time() + 999999,
+        }
+        self._save_tasks()
+        self._log(f"New async task registered: {task_id} (conv: {conversation_id})")
+
+        # Capture the running event loop to schedule the background coroutine
+        loop = getattr(self, "loop", None)
+        if not loop:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
+            self.loop = loop
+
+        # Schedule the worker coroutine safely depending on if we are inside the loop thread
+        try:
+            running_loop = asyncio.get_running_loop()
+            if running_loop == loop:
+                loop.create_task(
+                    self._background_delegate_worker(task_id, edith_config, task, session_memory)
+                )
+            else:
+                asyncio.run_coroutine_threadsafe(
+                    self._background_delegate_worker(task_id, edith_config, task, session_memory),
+                    loop
+                )
+        except RuntimeError:
+            asyncio.run_coroutine_threadsafe(
+                self._background_delegate_worker(task_id, edith_config, task, session_memory),
+                loop
+            )
+        self.start_polling()
+        return task_id
+
+    async def _background_delegate_worker(
+        self,
+        task_id: str,
+        edith_config: EdithConfig,
+        task: str,
+        session_memory: dict | None
+    ) -> None:
+        task_info = self.tasks.get(task_id)
+        if not task_info:
+            return
+
+        conversation_id = task_info["conversation_id"]
+        loop = asyncio.get_running_loop()
+
+        try:
+            self._log(f"Starting background delegation for task {task_id}...")
+            if edith_config.agent_api_base:
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: _post_agent_message(edith_config, conversation_id, task)
+                )
+                if response.status_code >= 400:
+                    error_msg = _handle_http_error(response)
+                    task_info["status"] = "failed"
+                    task_info["result"] = error_msg
+                    self._save_tasks()
+                    await self._notify_user(task_id, "failed", error_msg)
+                    return
+
+                data = _json_or_text(response)
+                reply = _latest_assistant_text(data)
+
+                if reply:
+                    task_info["status"] = "completed"
+                    task_info["result"] = reply
+                    task_info["completed_at"] = datetime.now().isoformat()
+                    task_info["last_update"] = reply
+                    self._save_tasks()
+                    self._log(f"Async task {task_id} completed immediately.")
+                    await self._notify_user(task_id, "completed", reply)
+                else:
+                    # Seed the last update baseline with the initial agent reply,
+                    # and schedule the next standard poll for 15s from now.
+                    task_info["last_update"] = "acknowledged"
+                    task_info["next_poll_time"] = time.time() + self.polling_interval
+                    self._save_tasks()
+                    self._log(f"Async post complete for task {task_id}. Polling enabled.")
+            else:
+                # Webhook direct endpoint
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: requests.post(
+                        edith_config.endpoint,
+                        headers=_headers(edith_config),
+                        json=_build_payload("delegate", task, session_memory),
+                        timeout=edith_config.timeout
+                    )
+                )
+                if response.status_code >= 400:
+                    error_msg = _handle_http_error(response)
+                    task_info["status"] = "failed"
+                    task_info["result"] = error_msg
+                    self._save_tasks()
+                    await self._notify_user(task_id, "failed", error_msg)
+                    return
+
+                text = _response_text(response)
+                task_info["status"] = "completed"
+                task_info["result"] = text
+                task_info["completed_at"] = datetime.now().isoformat()
+                self._save_tasks()
+                await self._notify_user(task_id, "completed", text)
+
+        except Exception as e:
+            task_info["status"] = "failed"
+            task_info["result"] = f"Failed to post task: {e}"
+            self._save_tasks()
+            await self._notify_user(task_id, "failed", task_info["result"])
 
     def get_summary(self) -> str:
         pending = [t["task_description"] for t in self.tasks.values() if t["status"] == "pending"]

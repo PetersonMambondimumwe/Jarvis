@@ -5,11 +5,18 @@ import time
 from pathlib import Path
 
 try:
+    import requests as _requests
+    _REQUESTS = True
+except ImportError:
+    _REQUESTS = False
+
+try:
     import pyautogui
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE    = 0.06
     _PYAUTOGUI = True
-except ImportError:
+except Exception:
+    pyautogui = None
     _PYAUTOGUI = False
 
 try:
@@ -23,14 +30,16 @@ def _base_dir() -> Path:
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 
-def _get_os() -> str:
+def _get_config() -> dict:
     try:
-        cfg = json.loads(
+        return json.loads(
             (_base_dir() / "config" / "api_keys.json").read_text(encoding="utf-8")
         )
-        return cfg.get("os_system", "windows").lower()
     except Exception:
-        return "windows"
+        return {}
+
+def _get_os() -> str:
+    return _get_config().get("os_system", "windows").lower()
 
 
 def _require_pyautogui():
@@ -222,6 +231,116 @@ _PLATFORM_MAP = [
 ]
 
 
+# ── Email via Power Automate ───────────────────────────────────────────────
+
+_EMAIL_HTML_TEMPLATE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Message from Jarvis</title>
+<style>
+  body {{ margin: 0; padding: 0; background-color: #f2f4f7;
+          font-family: 'Segoe UI', Arial, sans-serif; }}
+  .email-wrapper {{ width: 100%; padding: 40px 0; }}
+  .email-container {{ max-width: 600px; margin: 0 auto;
+      background-color: #ffffff; border-radius: 12px;
+      overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }}
+  .header {{ background: linear-gradient(135deg, #1f2937, #111827);
+      padding: 32px 40px; text-align: center; }}
+  .header h1 {{ color: #ffffff; font-size: 22px; margin: 0;
+      letter-spacing: 0.5px; }}
+  .header p {{ color: #9ca3af; font-size: 13px; margin: 6px 0 0; }}
+  .body-content {{ padding: 36px 40px; }}
+  .greeting {{ font-size: 16px; color: #111827; margin-bottom: 20px; }}
+  .message {{ font-size: 15px; line-height: 1.7; color: #374151;
+      background-color: #f9fafb; border-left: 4px solid #2563eb;
+      padding: 18px 20px; border-radius: 6px; }}
+  .signature {{ margin-top: 32px; font-size: 15px; color: #111827; }}
+  .signature .name {{ font-weight: 600; color: #2563eb;
+      display: block; margin-top: 4px; }}
+  .footer {{ text-align: center; padding: 20px;
+      font-size: 12px; color: #9ca3af; }}
+</style>
+</head>
+<body>
+  <div class="email-wrapper">
+    <div class="email-container">
+      <div class="header">
+        <h1>Message from Jarvis</h1>
+        <p>Personal Assistant</p>
+      </div>
+      <div class="body-content">
+        <p class="greeting">Dear {name},</p>
+        <div class="message">
+          {message}
+        </div>
+        <p class="signature">
+          Kind regards,
+          <span class="name">{sender_name}</span>
+        </p>
+      </div>
+      <div class="footer">
+        This message was sent on behalf of {sender_name}.
+      </div>
+    </div>
+  </div>
+</body>
+</html>"""
+
+
+def _send_email_via_power_automate(
+    to: str,
+    name: str,
+    subject: str,
+    message: str,
+    sender_name: str = "Jarvis",
+) -> str:
+    """POST to the Power Automate HTTP trigger to send a branded HTML email."""
+    if not _REQUESTS:
+        return "[Email] 'requests' library not installed. Run: pip install requests"
+
+    cfg = _get_config()
+    url = cfg.get("power_automate_email_url", "").strip()
+    if not url:
+        return "[Email] power_automate_email_url not set in config/api_keys.json"
+
+    # Build HTML body from template
+    html_body = _EMAIL_HTML_TEMPLATE.format(
+        name=name or "there",
+        message=message.replace("\n", "<br>"),
+        sender_name=sender_name,
+    )
+
+    payload = {
+        "to":          to,
+        "name":        name or "there",
+        "subject":     subject or f"Message from {sender_name}",
+        "message":     message,
+        "html_body":   html_body,
+        "sender_name": sender_name,
+    }
+
+    print(f"[Email] Triggering Power Automate flow -> {to} | Subject: {payload['subject']}")
+
+    try:
+        resp = _requests.post(url, json=payload, timeout=30)
+        if resp.status_code in (200, 202):
+            return (
+                f"✅ Email sent to {to} via Power Automate. "
+                f"Subject: \"{payload['subject']}\"."
+            )
+        else:
+            return (
+                f"[Email] Power Automate returned HTTP {resp.status_code}: "
+                f"{resp.text[:200]}"
+            )
+    except _requests.Timeout:
+        return "[Email] Power Automate flow timed out. The flow may still be running."
+    except Exception as exc:
+        return f"[Email] Failed to trigger flow: {exc}"
+
+
 def _resolve_platform(platform_str: str):
     key = platform_str.lower().strip()
     for keywords, handler in _PLATFORM_MAP:
@@ -239,19 +358,38 @@ def send_message(
     params       = parameters or {}
     receiver     = params.get("receiver", "").strip()
     message_text = params.get("message_text", "").strip()
-    platform     = params.get("platform", "whatsapp").strip()
+    platform     = params.get("platform", "whatsapp").strip().lower()
 
     if not receiver:
         return "Please specify a recipient."
     if not message_text:
         return "Please specify the message content."
-    if not _PYAUTOGUI:
-        return "PyAutoGUI is not installed — cannot control the desktop."
 
     preview = message_text[:50] + ("…" if len(message_text) > 50 else "")
-    print(f"[SendMessage] 📨 {platform} → {receiver}: {preview}")
+    print(f"[SendMessage] >> {platform} -> {receiver}: {preview}")
     if player:
         player.write_log(f"[msg] {platform} → {receiver}")
+
+    # ── Email via Power Automate ──────────────────────────────────────────
+    if platform in ("email", "mail", "e-mail"):
+        name        = params.get("name", "").strip()
+        subject     = params.get("subject", "").strip()
+        sender_name = params.get("sender_name", "Jarvis").strip()
+        result = _send_email_via_power_automate(
+            to=receiver,
+            name=name,
+            subject=subject,
+            message=message_text,
+            sender_name=sender_name,
+        )
+        print(f"[SendMessage] {'OK' if 'OK' in result or 'sent' in result.lower() else 'ERR'} {result}")
+        if player:
+            player.write_log(f"[email] {result}")
+        return result
+
+    # ── Desktop app messaging ─────────────────────────────────────────────
+    if not _PYAUTOGUI:
+        return "PyAutoGUI is not installed — cannot control the desktop."
 
     try:
         handler = _resolve_platform(platform)

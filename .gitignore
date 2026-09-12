@@ -11,6 +11,7 @@ ENV/
 # Project Specific
 config/api_keys.json
 memory/
+.antigravity_bridge/
 *.log
 dashboard/certs/
 dashboard/logs/

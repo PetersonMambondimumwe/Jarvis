@@ -1,0 +1,48 @@
+{
+  "mcpServers": {
+    "antigravity": {
+      "command": "python",
+      "args": ["core/mcp_servers/antigravity_server.py"],
+      "enabled": true
+    },
+    "system_diagnostics": {
+      "command": "python",
+      "args": ["core/mcp_servers/system_diag_server.py"],
+      "enabled": true
+    },
+    "weather": {
+      "command": "python",
+      "args": ["core/mcp_servers/weather_server.py"],
+      "enabled": true
+    },
+    "filesystem": {
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:\\Users\\u19094290\\Downloads",
+        "C:\\Users\\u19094290\\Documents",
+        "C:\\Users\\u19094290\\Desktop"
+      ],
+      "enabled": true
+    },
+    "sqlite": {
+      "command": "uvx",
+      "args": ["mcp-server-sqlite", "--db-path", "jarvis_sqlite.db"],
+      "enabled": false
+    },
+    "brave-search": {
+      "command": "npx.cmd",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": ""
+      },
+      "enabled": false
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "enabled": false
+    }
+  }
+}

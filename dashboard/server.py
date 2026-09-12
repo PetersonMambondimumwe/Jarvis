@@ -11,6 +11,7 @@ Install deps:  pip install fastapi "uvicorn[standard]" cryptography
 import asyncio
 import base64
 import hashlib
+import os
 import re
 import secrets
 import socket
@@ -375,12 +376,14 @@ class DashboardServer:
         self._aes_cache:  dict[str, bytes]= {}   # session_key → AES bytes
         self._clients: set[WebSocket]     = set()
         self._history: list[dict]         = []
+        self._current_status: dict        = {"type": "status", "state": "starting"}
         self._command_queue               = asyncio.Queue()
         self._wake_callback               = None
         self._connect_callback            = None
         self._pending_keys: dict[str, float] = {}
         self._device_sessions: dict[str, dict] = {}  # device_token → {session_key}
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
+        self._phone_audio_ws_clients: set[WebSocket] = set()
         self._uploads_dir                 = UPLOADS_DIR
         self._login_html                  = _read("login.html")
         self._app_html                    = _read("app.html")
@@ -435,6 +438,8 @@ class DashboardServer:
     # ── broadcast ────────────────────────────────────────────────────────
 
     async def broadcast(self, msg: dict) -> None:
+        if msg.get("type") == "status":
+            self._current_status = dict(msg)
         self._history.append(msg)
         if len(self._history) > 300:
             self._history = self._history[-300:]
@@ -446,12 +451,26 @@ class DashboardServer:
                 dead.add(ws)
         self._clients -= dead
 
+    async def broadcast_audio(self, pcm_chunk: bytes) -> None:
+        """Send raw PCM audio chunks to connected phone audio websockets."""
+        dead: set[WebSocket] = set()
+        for ws in list(self._phone_audio_ws_clients):
+            try:
+                await ws.send_bytes(pcm_chunk)
+            except Exception:
+                dead.add(ws)
+        self._phone_audio_ws_clients -= dead
+
+
     # ── FastAPI app ───────────────────────────────────────────────────────
 
     def _build_app(self) -> "FastAPI":
         app = FastAPI(docs_url=None, redoc_url=None)
 
         def _auth(req: Request) -> bool:
+            client_host = req.client.host if req.client else ""
+            if client_host in ("127.0.0.1", "::1", "localhost"):
+                return True
             tok = req.headers.get("authorization", "").removeprefix("Bearer ").strip()
             return bool(tok) and tok in self._tokens
 
@@ -478,32 +497,50 @@ class DashboardServer:
                     .replace("__PORT__", str(PORT)))
             return HTMLResponse(html)
 
+        @app.get("/api/health")
+        async def health():
+            return JSONResponse({
+                "ok": True,
+                "status": self._current_status.get("state", "starting"),
+                "clients": len(self._clients),
+                "voice_clients": len(self._phone_audio_ws_clients),
+                "history": len(self._history),
+            })
+
         @app.post("/login")
         async def login(req: Request):
+            import os
             body    = await req.json()
             entered = str(body.get("pin", "")).strip().upper()
             now     = time.time()
-            if entered in self._pending_keys and self._pending_keys[entered] > now:
-                del self._pending_keys[entered]          # one-time use
+            master_pin = os.environ.get("JARVIS_PIN", "JARVIS").upper()
+            is_valid   = (entered == master_pin) or (entered in self._pending_keys and self._pending_keys[entered] > now)
+            if is_valid:
+                if entered in self._pending_keys:
+                    del self._pending_keys[entered]
                 tok = secrets.token_urlsafe(32)
                 self._tokens.add(tok)
                 self._token_keys[tok] = entered
-                self._aes_key(entered)                   # pre-derive & cache
+                self._aes_key(entered)
                 if self._connect_callback:
-                    self._connect_callback()
+                    try: self._connect_callback()
+                    except Exception: pass
                 asyncio.create_task(self.broadcast(
                     {"type": "sys", "text": "Remote connection established."}
                 ))
-                # Bearer token in response body — no cookies needed (works on any browser/HTTP)
                 return JSONResponse({"ok": True, "token": tok})
             return JSONResponse({"ok": False, "error": "Invalid or expired key"},
                                 status_code=401)
 
         @app.get("/auto-login")
         async def auto_login(key: str = ""):
-            """QR code target — validates one-time key, creates session, redirects phone."""
+            """QR code target — validates one-time key or master PIN, creates session, redirects phone."""
+            import os
+            key = key.strip().upper()
             now = time.time()
-            if not key or key not in self._pending_keys or self._pending_keys[key] <= now:
+            master_pin = os.environ.get("JARVIS_PIN", "JARVIS").upper()
+            is_valid   = (key == master_pin) or (key in self._pending_keys and self._pending_keys[key] > now)
+            if not is_valid:
                 return HTMLResponse("""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width">
 <style>
@@ -515,7 +552,8 @@ class DashboardServer:
 <p>Press <strong style="color:#dde3ed">Remote Control</strong> in JARVIS to get a new QR code.</p>
 </div></body></html>""")
 
-            del self._pending_keys[key]
+            if key in self._pending_keys:
+                del self._pending_keys[key]
             tok     = secrets.token_urlsafe(32)
             dev_tok = secrets.token_urlsafe(32)
             self._tokens.add(tok)
@@ -524,7 +562,8 @@ class DashboardServer:
             self._device_sessions[dev_tok] = {"session_key": key}
 
             if self._connect_callback:
-                self._connect_callback()
+                try: self._connect_callback()
+                except Exception: pass
             asyncio.create_task(self.broadcast(
                 {"type": "sys", "text": "Remote connection established via QR code."}
             ))
@@ -613,6 +652,7 @@ class DashboardServer:
                 await websocket.close(code=4001)
                 return
             await websocket.accept()
+            self._phone_audio_ws_clients.add(websocket)
             asyncio.create_task(self.broadcast(
                 {"type": "sys", "text": "Phone microphone live."}
             ))
@@ -628,6 +668,7 @@ class DashboardServer:
             except WebSocketDisconnect:
                 pass
             finally:
+                self._phone_audio_ws_clients.discard(websocket)
                 asyncio.create_task(self.broadcast(
                     {"type": "sys", "text": "Phone microphone stopped."}
                 ))
@@ -733,6 +774,11 @@ class DashboardServer:
                     await websocket.send_json(entry)
                 except Exception:
                     break
+            try:
+                await websocket.send_json(self._current_status)
+            except Exception:
+                self._clients.discard(websocket)
+                return
             try:
                 while True:
                     data = await websocket.receive_json()

@@ -1,4 +1,17 @@
-from core.wake_word import WakeWordListener
+# WakeWordListener is imported lazily only in desktop mode with microphone
+WakeWordListener = None
+
+# Headless / Docker display safety: mock GUI libraries if running without an active display
+import sys
+from unittest.mock import MagicMock
+for _mod in ['pyautogui', 'pyperclip', 'mouse', 'keyboard']:
+    try:
+        _m = __import__(_mod)
+        if _mod == 'pyautogui':
+            _m.size()
+    except Exception:
+        sys.modules[_mod] = MagicMock()
+
 import platform as _platform
 import subprocess as _subprocess
 
@@ -18,6 +31,7 @@ if _platform.system() == "Windows":
 
 
 import asyncio
+import os
 import re
 import threading
 import time
@@ -30,7 +44,9 @@ from pathlib import Path
 import sounddevice as sd
 from google import genai
 from google.genai import types
-from ui import JarvisUI
+# JarvisUI is imported lazily in main() so headless mode does not require PyQt6/X11
+JarvisUI = None
+from core.tool_registry import ToolRegistry
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
 )
@@ -53,11 +69,15 @@ from actions.web_search        import web_search as web_search_action
 from actions.computer_control  import computer_control
 from actions.game_updater      import game_updater
 from actions.system_monitor    import SystemMonitor, get_system_status
+from actions.database_manager   import database_manager, db_cleanup
 from actions.proactive         import ProactiveEngine
-from actions.database_manager   import database_manager
 from actions.edith_agent        import edith_agent
+from actions.github_manager     import github_manager
+from actions.vercel_manager     import vercel_manager
+from actions.antigravity_bridge import antigravity_bridge
 from core.perception_engine     import PerceptionEngine
 from core.task_manager          import TaskManager
+from core.mcp_client            import MCPClientManager
 
 
 def get_base_dir():
@@ -69,15 +89,27 @@ def get_base_dir():
 BASE_DIR        = get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
-LIVE_MODEL          = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+DEFAULT_LIVE_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000
 RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE          = 512
 
 def _get_api_key() -> str:
+    env_key = os.environ.get("GEMINI_API_KEY")
+    if env_key:
+        return env_key
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)["gemini_api_key"]
+
+
+def _get_live_model() -> str:
+    try:
+        with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
+            configured = json.load(f).get("gemini_live_model", "").strip()
+        return configured or DEFAULT_LIVE_MODEL
+    except Exception:
+        return DEFAULT_LIVE_MODEL
 
 
 def _load_system_prompt() -> str:
@@ -161,13 +193,31 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "send_message",
-        "description": "Sends a text message via WhatsApp, Telegram, or other messaging platform.",
+        "description": (
+            "Sends a message to someone via WhatsApp, Telegram, or other platforms. "
+            "Also sends emails via Power Automate when platform is 'email'. "
+            "Use platform='email' whenever the user asks to send an email. "
+            "Examples: 'email ruth@gmail.com saying get well soon', "
+            "'send an email to john@example.com about the meeting'."
+        ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "receiver":     {"type": "STRING", "description": "Recipient contact name"},
-                "message_text": {"type": "STRING", "description": "The message to send"},
-                "platform":     {"type": "STRING", "description": "Platform: WhatsApp, Telegram, etc."}
+                "receiver":     {
+                    "type": "STRING",
+                    "description": "Recipient email address (for email) or contact name (for chat apps)"
+                },
+                "message_text": {"type": "STRING", "description": "The message body to send"},
+                "platform":     {
+                    "type": "STRING",
+                    "description": (
+                        "Delivery platform. Use 'email' to send via Power Automate. "
+                        "Other options: WhatsApp, Telegram, Instagram, Signal, Discord, Messenger."
+                    )
+                },
+                "name":        {"type": "STRING",  "description": "Recipient's first name for email greeting (e.g. 'Ruth'). Used in 'Dear [name],'"},
+                "subject":     {"type": "STRING",  "description": "Email subject line. Required when platform is 'email'."},
+                "sender_name": {"type": "STRING",  "description": "Signature name in the email. Defaults to 'Jarvis'."},
             },
             "required": ["receiver", "message_text", "platform"]
         }
@@ -252,15 +302,16 @@ TOOL_DECLARATIONS = [
     {
         "name": "database_manager",
         "description": (
-            "Manages the Neon PostgreSQL database. Use for: listing tables, "
-            "describing the database schema, getting table schemas, and executing SQL queries "
-            "(SELECT, INSERT, UPDATE, DELETE). Essential for interacting with Project ASC data. "
+            "Manages the Neon PostgreSQL database with intelligent caching. Use for: listing tables, "
+            "describing the database schema, getting table schemas, executing SQL queries "
+            "(SELECT, INSERT, UPDATE, DELETE), and managing the query cache. Queries are automatically "
+            "cached in Redis and conversation memory for 5 minutes. Essential for interacting with Project ASC data. "
             "For natural-language questions about stored Project ASC data, call this tool."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action":     {"type": "STRING", "description": "query | list_tables | describe_database | get_schema"},
+                "action":     {"type": "STRING", "description": "query | list_tables | describe_database | get_schema | clear_cache | cache_stats"},
                 "query":      {"type": "STRING", "description": "The SQL query to execute (query action)"},
                 "table_name": {"type": "STRING", "description": "Table name for get_schema action"},
             },
@@ -525,6 +576,112 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "github_manager",
+        "description": (
+            "Connects Jarvis to the user's GitHub account. Use this tool for any request "
+            "related to GitHub repositories, code, issues, pull requests, branches, or commits. "
+            "Examples: 'show me my repos', 'what are the open issues on Mark-XLVIII', "
+            "'create a branch called feature/dark-mode', 'read the README', "
+            "'open an issue: fix login bug', 'what changed this week on my project'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": (
+                        "The GitHub action to perform. One of:\n"
+                        "list_repos       — list repositories (scope: owner|all|starred)\n"
+                        "repo_info        — detailed info about a repo\n"
+                        "list_issues      — list issues (state: open|closed|all)\n"
+                        "create_issue     — create a new issue (title, body, labels)\n"
+                        "close_issue      — close an issue by number\n"
+                        "list_prs         — list pull requests\n"
+                        "create_pr        — open a pull request (head, base, title, body)\n"
+                        "merge_pr         — merge a PR by number\n"
+                        "list_branches    — list all branches\n"
+                        "create_branch    — create a branch (branch, from_branch)\n"
+                        "read_file        — read a file or directory from the repo (path, ref)\n"
+                        "list_commits     — recent commits (branch, limit)\n"
+                        "search_repos     — search GitHub by keyword (query)\n"
+                        "user_info        — authenticated user profile\n"
+                        "activity_summary — summary of recent GitHub activity"
+                    )
+                },
+                "repo": {
+                    "type": "STRING",
+                    "description": "Repository name or 'owner/repo'. E.g. 'Mark-XLVIII' or 'torvalds/linux'."
+                },
+                "title":       {"type": "STRING",  "description": "Issue or PR title"},
+                "body":        {"type": "STRING",  "description": "Issue or PR body text"},
+                "number":      {"type": "INTEGER", "description": "Issue or PR number"},
+                "state":       {"type": "STRING",  "description": "Filter state: open | closed | all"},
+                "branch":      {"type": "STRING",  "description": "Branch name to create or target"},
+                "from_branch": {"type": "STRING",  "description": "Source branch when creating a new branch"},
+                "head":        {"type": "STRING",  "description": "Source branch for a pull request"},
+                "base":        {"type": "STRING",  "description": "Target branch for a pull request"},
+                "path":        {"type": "STRING",  "description": "File or directory path inside the repo"},
+                "ref":         {"type": "STRING",  "description": "Branch/tag/SHA to read from (default: default branch)"},
+                "query":       {"type": "STRING",  "description": "Search query for search_repos"},
+                "scope":       {"type": "STRING",  "description": "For list_repos: owner | all | starred"},
+                "limit":       {"type": "INTEGER", "description": "Max number of results to return"},
+                "labels":      {"type": "STRING",  "description": "Comma-separated labels for create_issue"},
+                "method":      {"type": "STRING",  "description": "Merge method for merge_pr: merge | squash | rebase"}
+            },
+            "required": ["action"]
+        }
+    },
+    {
+        "name": "vercel_manager",
+        "description": (
+            "Connects Jarvis to the user's Vercel account to manage and monitor hosted websites. "
+            "Use for any request about Vercel projects, deployments, build failures, logs, domains, "
+            "or environment variables. "
+            "Examples: 'show my Vercel projects', 'are any deployments failing?', "
+            "'show me the build logs for my site', 'redeploy my portfolio', "
+            "'add an environment variable to my project', 'check deployment status'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": (
+                        "The Vercel action to perform. One of:\n"
+                        "list_projects      — list all Vercel projects with status\n"
+                        "project_info       — detailed info for one project\n"
+                        "list_deployments   — recent deployments (filter by project/state)\n"
+                        "deployment_info    — status and metadata for a specific deployment\n"
+                        "deployment_logs    — build/runtime logs for a deployment\n"
+                        "check_failures     — scan all projects for failed builds\n"
+                        "redeploy           — trigger a redeployment of the latest build\n"
+                        "cancel_deployment  — cancel a queued or building deployment\n"
+                        "list_domains       — list custom domains for a project\n"
+                        "list_env           — list environment variables for a project\n"
+                        "add_env            — add or update an environment variable\n"
+                        "delete_env         — delete an environment variable\n"
+                        "deployment_summary — health overview across all projects"
+                    )
+                },
+                "project": {
+                    "type": "STRING",
+                    "description": "Vercel project name or ID. E.g. 'my-portfolio' or 'prj_xxx'."
+                },
+                "deployment_id": {
+                    "type": "STRING",
+                    "description": "Deployment UID. E.g. 'dpl_xxx'. Get from list_deployments."
+                },
+                "state":   {"type": "STRING",  "description": "Filter deployments by state: READY | ERROR | BUILDING | QUEUED | CANCELED"},
+                "limit":   {"type": "INTEGER", "description": "Max number of deployments to return (default 10)"},
+                "target":  {"type": "STRING",  "description": "Deployment target: production | preview (default: production)"},
+                "key":     {"type": "STRING",  "description": "Environment variable key name"},
+                "value":   {"type": "STRING",  "description": "Environment variable value"},
+                "env_type":{"type": "STRING",  "description": "Env var type: plain | secret | system (default: plain)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "save_memory",
         "description": (
             "Save an important personal fact about the user to long-term memory. "
@@ -554,6 +711,40 @@ TOOL_DECLARATIONS = [
             "required": ["category", "key", "value"]
         }
     },
+    {
+        "name": "antigravity_bridge",
+        "description": (
+            "Delegates complex coding, full-stack software development, code refactoring, bug fixing, "
+            "test running, or multi-file programming tasks directly to Antigravity, your autonomous AI developer. "
+            "Use this whenever the user asks to build features, fix code, inspect repository files, or execute development plans."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "delegate (default) | status | list",
+                },
+                "task": {
+                    "type": "STRING",
+                    "description": "Clear, detailed instruction of what code or feature Antigravity should build or fix.",
+                },
+                "task_id": {
+                    "type": "STRING",
+                    "description": "Task ID to inspect (for status action).",
+                },
+                "priority": {
+                    "type": "STRING",
+                    "description": "normal | high | urgent",
+                },
+                "project": {
+                    "type": "STRING",
+                    "description": "Project or repository name (optional).",
+                },
+            },
+            "required": []
+        }
+    },
 ]
 
 # --- Plugin system ---
@@ -561,8 +752,9 @@ TOOL_DECLARATIONS = [
 
 class JarvisLive:
 
-    def __init__(self, ui: JarvisUI):
+    def __init__(self, ui):
         self.ui             = ui
+        self.headless       = getattr(ui, "__class__", None).__name__ == "HeadlessUI"
         self.session              = None
         self.audio_in_queue       = None
         self.out_queue            = None
@@ -587,6 +779,13 @@ class JarvisLive:
         self._perception       = PerceptionEngine(api_key=_get_api_key(), player=self.ui)
         self.task_manager     = TaskManager(player=self.ui, speak_callback=self.speak)
         self._last_user_speech = time.monotonic()  # updated on every user utterance
+        # Initialize database caching layer
+        self._db_cache_initialized = False
+        # MCP Client Manager
+        self._mcp = MCPClientManager()
+        # Tool registry — populated by _register_tools()
+        self._tool_registry = ToolRegistry()
+        self._register_tools()
 
     def _make_remote_key(self):
         """Called from Qt main thread when user presses Remote Control."""
@@ -677,12 +876,15 @@ class JarvisLive:
             parts.append(mem_str)
         parts.append(sys_prompt)
 
+        mcp_declarations = self._mcp.get_function_declarations() if hasattr(self, "_mcp") else []
+        all_declarations = list(TOOL_DECLARATIONS) + mcp_declarations
+
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             output_audio_transcription={},
             input_audio_transcription={},
             system_instruction="\n".join(parts),
-            tools=[{"function_declarations": TOOL_DECLARATIONS}],
+            tools=[{"function_declarations": all_declarations}],
             session_resumption=types.SessionResumptionConfig(),
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
@@ -693,176 +895,260 @@ class JarvisLive:
             ),
         )
 
+    # ── Tool registration ─────────────────────────────────────────────────────────
+
+    def _register_tools(self) -> None:
+        """Register every Gemini tool with a handler lambda and per-tool timeout.
+
+        Handlers are thin lambdas that close over self — they can safely
+        reference self.ui, self.speak, self._perception, etc. which are all
+        set before _register_tools() is called from __init__.
+        """
+        r  = self._tool_registry
+        ui = self.ui
+
+        r.register("open_app",
+            lambda args: open_app(parameters=args, response=None, player=ui, perception=self._perception),
+            timeout=15)
+
+        r.register("web_search",
+            lambda args: web_search_action(parameters=args, player=ui),
+            timeout=45)
+
+        r.register("weather_report",
+            lambda args: weather_action(parameters=args, player=ui),
+            timeout=15)
+
+        r.register("browser_control",
+            lambda args: browser_control(parameters=args, player=ui),
+            timeout=60)
+
+        r.register("database_manager",
+            lambda args: database_manager(parameters=args, player=ui),
+            timeout=30)
+
+        r.register("file_controller",
+            lambda args: file_controller(parameters=args, player=ui),
+            timeout=20)
+
+        r.register("send_message",
+            lambda args: send_message(parameters=args, response=None, player=ui, session_memory=None),
+            timeout=20)
+
+        r.register("reminder",
+            lambda args: reminder(parameters=args, response=None, player=ui),
+            timeout=10)
+
+        r.register("youtube_video",
+            lambda args: youtube_video(parameters=args, response=None, player=ui),
+            timeout=30)
+
+        r.register("computer_settings",
+            lambda args: computer_settings(parameters=args, response=None, player=ui),
+            timeout=10)
+
+        r.register("desktop_control",
+            lambda args: desktop_control(parameters=args, player=ui),
+            timeout=10)
+
+        r.register("code_helper",
+            lambda args: code_helper(parameters=args, player=ui, speak=self.speak),
+            timeout=60)
+
+        r.register("dev_agent",
+            lambda args: dev_agent(parameters=args, player=ui, speak=self.speak),
+            timeout=180)
+
+        r.register("computer_control",
+            lambda args: computer_control(parameters=args, player=ui, perception=self._perception),
+            timeout=15)
+
+        r.register("game_updater",
+            lambda args: game_updater(parameters=args, player=ui, speak=self.speak),
+            timeout=120)
+
+        r.register("flight_finder",
+            lambda args: flight_finder(parameters=args, player=ui),
+            timeout=60)
+
+        r.register("system_status",
+            lambda args: get_system_status(),
+            timeout=5)
+
+        r.register("file_processor",
+            lambda args: file_processor(
+                parameters={**args, "file_path": args.get("file_path") or getattr(ui, "current_file", None)},
+                player=ui,
+                speak=self.speak,
+            ),
+            timeout=120)
+
+        r.register("edith_agent",
+            lambda args: edith_agent(
+                parameters=args,
+                player=ui,
+                session_memory=getattr(self, "_session_memory", {}),
+                task_manager=self.task_manager,
+            ),
+            timeout=180)
+
+        r.register("github_manager",
+            lambda args: github_manager(
+                parameters=args,
+                player=ui,
+                speak=self.speak,
+            ),
+            timeout=30)
+
+        r.register("vercel_manager",
+            lambda args: vercel_manager(
+                parameters=args,
+                player=ui,
+                speak=self.speak,
+            ),
+            timeout=30)
+
+        r.register("antigravity_bridge",
+            lambda args: antigravity_bridge(
+                parameters=args,
+                player=ui,
+                task_manager=self.task_manager,
+                speak=self.speak,
+            ),
+            timeout=30)
+
+    def _register_mcp_tools(self) -> None:
+        """Register dynamically discovered MCP tools into ToolRegistry."""
+        for decl in self._mcp.get_function_declarations():
+            tool_name = decl["name"]
+
+            def make_handler(name: str):
+                def handler(args: dict) -> str:
+                    if self._loop and self._loop.is_running():
+                        future = asyncio.run_coroutine_threadsafe(
+                            self._mcp.execute_tool(name, args),
+                            self._loop
+                        )
+                        return future.result(timeout=60)
+                    return asyncio.run(self._mcp.execute_tool(name, args))
+                return handler
+
+            self._tool_registry.register(
+                tool_name,
+                make_handler(tool_name),
+                timeout=60.0
+            )
+
+    # ── Vision helper ────────────────────────────────────────────────────────
+
+    async def _handle_screen_process(self, args: dict) -> str:
+        """Vision capture with cooldown guard and camera/screen branching.
+
+        Extracted from _execute_tool so the vision state machine is
+        independently readable and testable.
+        """
+        import time as _t_mod
+        _now      = _t_mod.monotonic()
+        _cooldown = 4.0  # seconds — covers echo window after speaking ends
+
+        if self._vision_busy or (_now - self._vision_last_time) < _cooldown:
+            _wait = max(0, _cooldown - (_now - self._vision_last_time))
+            print(f"[Vision] ⏳ Cooldown active ({_wait:.1f}s remaining) — ignoring duplicate call")
+            return "Vision is still processing the previous request. I will not call this again."
+
+        self._vision_busy      = True
+        self._vision_last_time = _now
+        loop      = asyncio.get_event_loop()
+        angle     = args.get("angle", "screen").lower()
+        user_text = args.get("text", "What do you see?")
+
+        if angle == "camera":
+            img_b, mime_t = await loop.run_in_executor(None, _capture_camera)
+            self.ui.start_camera_stream()
+            self._vision_cam_active = True
+            print(f"[Vision] 📷 Camera: {len(img_b):,} bytes")
+            _stall = "camera"
+        else:
+            img_b, mime_t = await loop.run_in_executor(None, _capture_screen)
+            print(f"[Vision] 🖥️  Screen: {len(img_b):,} bytes")
+            if hasattr(self.ui, "show_camera_frame"):
+                self.ui.show_camera_frame(img_b)
+            _stall = "screen"
+
+        self._pending_vision = (img_b, mime_t, user_text, angle)
+        return (
+            f"[VISION_ACTIVE] {_stall.capitalize()} captured. "
+            f"Immediately say ONE natural sentence in the user's language "
+            f"(e.g. 'Looking at your {_stall} now, sir' / "
+            f"'{'Kameraya' if _stall == 'camera' else 'Ekrana'} bakıyorum efendim'). "
+            f"Do NOT describe or guess content — the actual image arrives in the NEXT message."
+        )
+
+    # ── Tool dispatch ───────────────────────────────────────────────────────────
+
     async def _execute_tool(self, fc) -> types.FunctionResponse:
+        """Dispatch a Gemini function call to the appropriate handler.
+
+        Special cases (save_memory, screen_process, close_camera,
+        shutdown_jarvis, web_search) are handled inline because they need
+        direct access to session state or have post-call side-effects.
+        Everything else is delegated to the ToolRegistry.
+        """
         name = fc.name
         args = dict(fc.args or {})
 
         print(f"[JARVIS] 🔧 {name}  {args}")
         self.ui.set_state("THINKING")
 
-        if name == "save_memory":
-            category = args.get("category", "notes")
-            key      = args.get("key", "")
-            value    = args.get("value", "")
-            if key and value:
-                update_memory({category: {key: {"value": value}}})
-                print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
-            if not self.ui.muted:
-                self.ui.set_state("LISTENING")
-            return types.FunctionResponse(
-                id=fc.id, name=name,
-                response={"result": "ok", "silent": True}
-            )
-
-        loop   = asyncio.get_event_loop()
         result = "Done."
 
         try:
-            if name == "open_app":
-                r = await loop.run_in_executor(
-                    None, 
-                    lambda: open_app(parameters=args, response=None, player=self.ui, perception=self._perception)
+            # ── save_memory: synchronous, must return silent flag ────────────
+            if name == "save_memory":
+                category = args.get("category", "notes")
+                key      = args.get("key", "")
+                value    = args.get("value", "")
+                if key and value:
+                    update_memory({category: {key: {"value": value}}})
+                    print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
+                if not self.ui.muted:
+                    self.ui.set_state("LISTENING")
+                return types.FunctionResponse(
+                    id=fc.id, name=name,
+                    response={"result": "ok", "silent": True}
                 )
-                result = r or f"Opened {args.get('app_name')}."
 
-            elif name == "weather_report":
-                r = await loop.run_in_executor(None, lambda: weather_action(parameters=args, player=self.ui))
-                result = r or "Weather delivered."
-
-            elif name == "browser_control":
-                r = await loop.run_in_executor(None, lambda: browser_control(parameters=args, player=self.ui))
-                result = r or "Done."
-
-            elif name == "database_manager":
-                r = await loop.run_in_executor(None, lambda: database_manager(parameters=args, player=self.ui))
-                result = r or "Done."
-
-            elif name == "file_controller":
-                r = await loop.run_in_executor(None, lambda: file_controller(parameters=args, player=self.ui))
-                result = r or "Done."
-
-            elif name == "send_message":
-                r = await loop.run_in_executor(None, lambda: send_message(parameters=args, response=None, player=self.ui, session_memory=None))
-                result = r or f"Message sent to {args.get('receiver')}."
-
-            elif name == "reminder":
-                r = await loop.run_in_executor(None, lambda: reminder(parameters=args, response=None, player=self.ui))
-                result = r or "Reminder set."
-
-            elif name == "youtube_video":
-                r = await loop.run_in_executor(None, lambda: youtube_video(parameters=args, response=None, player=self.ui))
-                result = r or "Done."
-
+            # ── screen_process: manages vision state machine ─────────────────
             elif name == "screen_process":
-                import time as _t_mod
-                _now = _t_mod.monotonic()
-                _cooldown = 4.0  # seconds — covers echo window after speaking ends
-                if self._vision_busy or (_now - self._vision_last_time) < _cooldown:
-                    _wait = max(0, _cooldown - (_now - self._vision_last_time))
-                    print(f"[Vision] ⏳ Cooldown active ({_wait:.1f}s remaining) — ignoring duplicate call")
-                    result = "Vision is still processing the previous request. I will not call this again."
-                else:
-                    self._vision_busy      = True
-                    self._vision_last_time = _now
-                    angle     = args.get("angle", "screen").lower()
-                    user_text = args.get("text", "What do you see?")
-                    if angle == "camera":
-                        img_b, mime_t = await loop.run_in_executor(None, _capture_camera)
-                        self.ui.start_camera_stream()
-                        self._vision_cam_active = True
-                        print(f"[Vision] 📷 Camera: {len(img_b):,} bytes")
-                        _stall = "camera"
-                    else:
-                        img_b, mime_t = await loop.run_in_executor(None, _capture_screen)
-                        print(f"[Vision] 🖥️  Screen: {len(img_b):,} bytes")
-                        # Visual feedback: show the captured screen frame in the UI
-                        if hasattr(self.ui, "show_camera_frame"):
-                            self.ui.show_camera_frame(img_b)
-                        _stall = "screen"
-                    self._pending_vision = (img_b, mime_t, user_text, angle)
-                    result = (
-                        f"[VISION_ACTIVE] {_stall.capitalize()} captured. "
-                        f"Immediately say ONE natural sentence in the user's language "
-                        f"(e.g. 'Looking at your {_stall} now, sir' / "
-                        f"'{'Kameraya' if _stall == 'camera' else 'Ekrana'} bakıyorum efendim'). "
-                        f"Do NOT describe or guess content — the actual image arrives in the NEXT message."
-                    )
+                result = await self._handle_screen_process(args)
 
+            # ── close_camera: direct UI call, no executor needed ────────────
             elif name == "close_camera":
                 self.ui.stop_camera_stream()
                 result = "Camera closed."
 
-            elif name == "computer_settings":
-                r = await loop.run_in_executor(None, lambda: computer_settings(parameters=args, response=None, player=self.ui))
-                result = r or "Done."
-
-            elif name == "desktop_control":
-                r = await loop.run_in_executor(None, lambda: desktop_control(parameters=args, player=self.ui))
-                result = r or "Done."
-
-            elif name == "code_helper":
-                r = await loop.run_in_executor(None, lambda: code_helper(parameters=args, player=self.ui, speak=self.speak))
-                result = r or "Done."
-
-            elif name == "dev_agent":
-                r = await loop.run_in_executor(None, lambda: dev_agent(parameters=args, player=self.ui, speak=self.speak))
-                result = r or "Done."
-
-            elif name == "web_search":
-                r = await loop.run_in_executor(None, lambda: web_search_action(parameters=args, player=self.ui))
-                result = r or "Done."
-                # Mirror results to the on-screen content panel
-                _mode = args.get("mode", "search")
-                if r and not r.startswith("No results") and not r.startswith("Search failed"):
-                    _query = args.get("query") or ", ".join(args.get("items", []))
-                    _label = f"{_mode.upper()} — {_query[:38]}" if _query else _mode.upper()
-                    self.ui.show_content(_label, r)
-            elif name == "file_processor":
-                if not args.get("file_path") and self.ui.current_file:
-                    args["file_path"] = self.ui.current_file
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: file_processor(parameters=args, player=self.ui, speak=self.speak)
-                )
-                result = r or "Done."
-
-            elif name == "computer_control":
-                r = await loop.run_in_executor(
-                    None, 
-                    lambda: computer_control(parameters=args, player=self.ui, perception=self._perception)
-                )
-                result = r or "Done."
-
-            elif name == "game_updater":
-                r = await loop.run_in_executor(None, lambda: game_updater(parameters=args, player=self.ui, speak=self.speak))
-                result = r or "Done."
-
-            elif name == "flight_finder":
-                r = await loop.run_in_executor(None, lambda: flight_finder(parameters=args, player=self.ui))
-                result = r or "Done."
-
-            elif name == "edith_agent":
-                r = await loop.run_in_executor(
-                    None,
-                    lambda: edith_agent(parameters=args, player=self.ui, session_memory=getattr(self, "_session_memory", {}), task_manager=self.task_manager)
-                )
-                result = r or "Task delegated to EDITH."
-
-            elif name == "system_status":
-                r = await loop.run_in_executor(None, get_system_status)
-                result = str(r)
-
+            # ── shutdown_jarvis: OS-level exit ───────────────
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("Goodbye, sir.")
                 def _shutdown():
-                    import time, os
-                    time.sleep(1)
-                    os._exit(0)
+                    import time as _t, os as _os
+                    _t.sleep(1)
+                    _os._exit(0)
                 threading.Thread(target=_shutdown, daemon=True).start()
 
+            # ── web_search: registry handles execution; mirror results to UI ─
+            elif name == "web_search":
+                result = await self._tool_registry.execute(name, args)
+                _mode  = args.get("mode", "search")
+                if result and not result.startswith("No results") and not result.startswith("Search failed"):
+                    _query = args.get("query") or ", ".join(args.get("items", []))
+                    _label = f"{_mode.upper()} — {_query[:38]}" if _query else _mode.upper()
+                    self.ui.show_content(_label, result)
+
+            # ── all other tools: registry with per-tool timeout ──────────────
             else:
-                result = f"Unknown tool: {name}"
+                result = await self._tool_registry.execute(name, args)
 
         except Exception as e:
             result = f"Tool '{name}' failed: {e}"
@@ -886,6 +1172,11 @@ class JarvisLive:
             await self.session.send_realtime_input(media=msg)
 
     async def _listen_audio(self):
+        if getattr(self, "headless", False):
+            print("[JARVIS] 🎤 Headless mode active: Listening for remote audio stream...")
+            while True:
+                await asyncio.sleep(1.0)
+
         print("[JARVIS] 🎤 Mic started")
         loop = asyncio.get_event_loop()
 
@@ -1032,13 +1323,19 @@ class JarvisLive:
     async def _play_audio(self):
         print("[JARVIS] 🔊 Play started")
 
-        stream = sd.RawOutputStream(
-            samplerate=RECEIVE_SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype="int16",
-            blocksize=CHUNK_SIZE,
-        )
-        stream.start()
+        stream = None
+        if not getattr(self, "headless", False):
+            try:
+                stream = sd.RawOutputStream(
+                    samplerate=RECEIVE_SAMPLE_RATE,
+                    channels=CHANNELS,
+                    dtype="int16",
+                    blocksize=CHUNK_SIZE,
+                )
+                stream.start()
+            except Exception as e:
+                print(f"[JARVIS] Local soundcard unavailable: {e}")
+                stream = None
 
         try:
             while True:
@@ -1057,95 +1354,39 @@ class JarvisLive:
                         self._turn_done_event.clear()
                     continue
                 self.set_speaking(True)
-                try:
-                    await asyncio.to_thread(stream.write, chunk)
-                except (RuntimeError, asyncio.CancelledError):
-                    break   # executor shutting down — exit cleanly
+
+                # Broadcast audio chunk to phone dashboard clients
+                if self._dashboard:
+                    try:
+                        asyncio.create_task(self._dashboard.broadcast_audio(chunk))
+                    except Exception:
+                        pass
+
+                if stream:
+                    try:
+                        await asyncio.to_thread(stream.write, chunk)
+                    except (RuntimeError, asyncio.CancelledError):
+                        break   # executor shutting down — exit cleanly
+                else:
+                    # In headless server mode, pace audio broadcast in real time (48000 bytes/s)
+                    dur = len(chunk) / (RECEIVE_SAMPLE_RATE * 2)
+                    await asyncio.sleep(dur)
         except Exception as e:
             print(f"[JARVIS] ❌ Play: {e}")
             raise
         finally:
             self.set_speaking(False)
-            stream.stop()
-            stream.close()
+            if stream:
+                try:
+                    stream.stop()
+                    stream.close()
+                except Exception:
+                    pass
 
-    # ── Morning briefing ────────────────────────────────────────────────────────
-
-    async def _send_startup_briefing(self) -> None:
-        """
-        Two-phase briefing for instant perceived response:
-          Phase 1 — immediate greeting (no tools, no fetch) → Jarvis speaks in <2s
-          Phase 2 — news fetched in background, injected after greeting finishes
-        """
-        await asyncio.sleep(0.3)
-        if not self.session:
-            return
-
-        # ── memory ───────────────────────────────────────────────────────────
-        memory   = load_memory()
-        identity = memory.get("identity", {})
-
-        def _val(k: str) -> str:
-            e = identity.get(k, {})
-            return (e.get("value", "") if isinstance(e, dict) else str(e)).strip()
-
-        lang = _val("language")
-        name = _val("name")
-
-        from datetime import datetime
-        time_str = datetime.now().strftime("%H:%M")
-
-        # ── Phase 1: instant greeting — one simple sentence ──────────────────
-        lang_clause = f" Respond in {lang}." if lang else ""
-        name_clause = f" Address the user as {name}." if name else ""
-        p1 = (
-            f"Greet the user, mention it is {time_str}, and say you are fetching today's news headlines now. "
-            f"One short sentence only. Do not call any tools.{lang_clause}{name_clause}"
-        )
-
-        await self.session.send_client_content(
-            turns={"parts": [{"text": p1}]},
-            turn_complete=True,
-        )
-        self.ui.write_log("SYS: Briefing phase 1 (greeting) sent.")
-
-        # ── Phase 2: fetch news in background, deliver after greeting plays ───
-        async def _guarded_news():
-            try:
-                await self._briefing_news_phase(lang)
-            except Exception as e:
-                print(f"[Briefing] Phase 2 error: {e}")
-                self.ui.write_log(f"SYS: Briefing news phase failed: {e}")
-        asyncio.create_task(_guarded_news())
-
-    async def _briefing_news_phase(self, lang: str) -> None:
-        """
-        Sends phase-2 (news) to Gemini ~1.5 s after phase-1 is dispatched so
-        Gemini starts working on it while phase-1 audio is still playing.
-        """
-        lang_str = f" Respond in {lang}." if lang else ""
-
-        # 1.5 s is enough for Gemini to finish generating phase-1 audio on its
-        # side (turn_complete) while the greeting is still being played locally.
-        await asyncio.sleep(1.5)
-
-        if not self.session:
-            return
-
-        p2 = (
-            "[BRIEFING] Call web_search with mode='news' and query='top world news today' "
-            "to find actual recent news articles with real event headlines (not just website names). "
-            "After the search, say ONE specific news event from the results in one sentence, "
-            f"then say the full list is displayed on screen.{lang_str}"
-        )
-
-        await self.session.send_client_content(
-            turns={"parts": [{"text": p2}]},
-            turn_complete=True,
-        )
-        self.ui.write_log("SYS: Briefing phase 2 (news) sent.")
 
     # ── System monitor ──────────────────────────────────────────────────────────
+    # Startup briefing is in core/startup.py → send_startup_briefing()
+
 
     async def _run_system_monitor(self) -> None:
         """Background task: voice alerts when metrics exceed thresholds."""
@@ -1205,10 +1446,10 @@ class JarvisLive:
             try:
                 chunk = await asyncio.wait_for(q.get(), timeout=1.0)
             except asyncio.TimeoutError:
-                # No audio for 1 s → phone mic inactive, give PC mic back
+                # No audio for 1 s -> phone mic inactive, give PC mic back
                 self._phone_active = False
                 continue
-            self._phone_active = True   # phone is streaming — silence PC mic
+            self._phone_active = True   # phone is streaming, silence PC mic
             with self._speaking_lock:
                 speaking = self._is_speaking
             if not speaking and not self.ui.muted:
@@ -1221,7 +1462,7 @@ class JarvisLive:
         self.ui.write_log("SYS: Phone connected via Remote Dashboard.")
         self.ui.notify_phone_connected()
 
-    # ── dashboard command relay ─────────────────────────────────────────────
+    # -- dashboard command relay -----------------------------------------------
 
     async def _process_dashboard_commands(self) -> None:
         while True:
@@ -1250,10 +1491,34 @@ class JarvisLive:
                 print(f"[Dashboard] Command error: {e}")
                 await asyncio.sleep(0.5)
 
-    # ── main loop ───────────────────────────────────────────────────────────
+    # ── Main loop ───────────────────────────────────────────────────────────
+    # Full session lifecycle (connect, reconnect, backoff) lives in
+    # core/session_manager.py → run_session_loop()
 
     async def run(self):
         self._loop = asyncio.get_event_loop()
+
+        # Initialize MCP Client (discover servers and tools)
+        try:
+            await self._mcp.initialize()
+            self._register_mcp_tools()
+        except Exception as e:
+            print(f"[MCP] ⚠️ Initialization error: {e}")
+
+        # Start always-on Wake Word Listener (only in desktop mode with local mic)
+        if not getattr(self, "headless", False):
+            try:
+                from core.wake_word import WakeWordListener
+                self._wake_listener = WakeWordListener(
+                    on_wake=lambda: self.ui.show_window(),
+                    auto_launch_main=False,
+                )
+                self._wake_listener.start()
+            except Exception as e:
+                print(f"[WakeWord] ⚠️ Could not start wake listener: {e}")
+                self._wake_listener = None
+        else:
+            self._wake_listener = None
 
         # Start dashboard (optional — needs: pip install fastapi "uvicorn[standard]" cryptography)
         try:
@@ -1261,131 +1526,66 @@ class JarvisLive:
             self._dashboard = DashboardServer()
             self._dashboard.set_connect_callback(self._on_phone_connected)
             asyncio.create_task(self._dashboard.serve())
-            # Runs for the whole lifetime, not just inside an active session
             asyncio.create_task(self._process_dashboard_commands())
-            # Wake Word Integration
             self._dashboard.set_wake_callback(lambda: self.ui.show_window())
+
+            if getattr(self, "headless", False):
+                if hasattr(self.ui, "dashboard_server"):
+                    self.ui.dashboard_server = self._dashboard
+                master_pin = os.environ.get("JARVIS_PIN", "JARVIS")
+                print("=" * 64)
+                print("  [+] JARVIS REMOTE WEB PORTAL READY")
+                print(f"      Default PIN : {master_pin}")
+                print(f"      Web Portal  : https://<SERVER_IP>:8000/login")
+                print(f"      One-Click   : https://<SERVER_IP>:8000/auto-login?key={master_pin}")
+                print("=" * 64)
         except Exception as e:
             print(f"[Dashboard] Disabled: {e}")
             self._dashboard = None
 
-        while True:
-            try:
-                print("[JARVIS] Connecting...")
-                self.ui.set_state("THINKING")
-                config = self._build_config()
-
-                # Fresh client on every reconnect — avoids stale HTTP session state
-                client = genai.Client(
-                    api_key=_get_api_key(),
-                    http_options={"api_version": "v1beta"}
-                )
-
-                async with (
-                    client.aio.live.connect(model=LIVE_MODEL, config=config) as session,
-                    asyncio.TaskGroup() as tg,
-                ):
-                    self.session          = session
-                    self.audio_in_queue   = asyncio.Queue()
-                    self.out_queue        = asyncio.Queue(maxsize=200)
-                    self._turn_done_event = asyncio.Event()
-
-                    # Reset transient state that must not carry over from a previous session
-                    self._pending_vision       = None
-                    self._vision_cam_active    = False
-                    self._vision_close_pending = False
-                    self._vision_busy          = False
-                    self._vision_last_time     = 0.0
-                    self._interrupted          = False
-
-                    print("[JARVIS] Connected.")
-                    self.ui.set_state("LISTENING")
-                    self.ui.write_log("SYS: JARVIS online.")
-
-                    if self._dashboard:
-                        await self._dashboard.broadcast({"type": "status", "state": "active"})
-
-                    tg.create_task(self._send_realtime())
-                    tg.create_task(self._listen_audio())
-                    tg.create_task(self._receive_audio())
-                    tg.create_task(self._play_audio())
-                    tg.create_task(self._run_system_monitor())
-                    tg.create_task(self._run_proactive_mode())
-                    self._perception.start()
-                    if self._dashboard:
-                        tg.create_task(self._relay_phone_audio())
-
-                    # Morning briefing — fires once per process launch
-                    if not self._briefing_sent:
-                        self._briefing_sent = True
-                        tg.create_task(self._send_startup_briefing())
-
-            except KeyboardInterrupt:
-                raise
-            except SystemExit:
-                raise
-            except BaseException as e:
-                # Catches both Exception and BaseExceptionGroup (Python 3.11+
-                # TaskGroup raises BaseExceptionGroup when tasks are cancelled
-                # externally, which `except Exception` would miss, letting the
-                # exception escape the while-loop and causing asyncio.run() to
-                # start shutdown — resulting in "executor after shutdown" errors).
-                err_str = str(e)
-                print(f"[JARVIS] Error ({type(e).__name__}): {e}")
-                traceback.print_exc()
-
-                # Invalid API key — stop hammering the API, prompt re-configuration
-                if "API key not valid" in err_str or "1007" in err_str:
-                    self.ui.write_log("ERR: API key invalid — please re-enter your key.")
-                    self.ui.set_state("SLEEPING")
-                    self.ui.prompt_reconfig()
-                    while not self.ui._win._ready:
-                        await asyncio.sleep(1)
-                    print("[JARVIS] New API key saved — reconnecting...")
-                    _conn_backoff = 3
-                    continue
-
-                # Network / timeout errors — log clearly and back off
-                is_net_err = any(k in err_str for k in (
-                    "TimeoutError", "timed out", "getaddrinfo", "CancelledError",
-                    "ConnectionRefusedError", "OSError", "Cannot connect",
-                ))
-                if is_net_err:
-                    _conn_backoff = min(getattr(self, "_conn_backoff", 3) * 2, 60)
-                    self._conn_backoff = _conn_backoff
-                    self.ui.write_log(
-                        f"NET: Bağlantı kurulamadı — {_conn_backoff}s sonra tekrar deneniyor. "
-                        "(VPN gerekiyor olabilir)"
-                    )
-                else:
-                    self._conn_backoff = 3
-            finally:
-                self.session = None
-                self.task_manager.stop_polling()
-
-            self.set_speaking(False)
-            self.ui.set_state("SLEEPING")
-
-            if self._dashboard:
-                await self._dashboard.broadcast({"type": "status", "state": "sleeping"})
-
-            delay = getattr(self, "_conn_backoff", 3)
-            print(f"[JARVIS] Reconnecting in {delay}s...")
-            await asyncio.sleep(delay)
+        from core.session_manager import run_session_loop
+        await run_session_loop(self, _get_api_key, _get_live_model)
 
 def main():
-    ui = JarvisUI("face.png")
+    import argparse
+    parser = argparse.ArgumentParser(description="JARVIS Voice Assistant")
+    parser.add_argument("--headless", action="store_true", help="Run headlessly without GUI or local soundcard (for Docker/servers)")
+    args, _ = parser.parse_known_args()
 
-    def runner():
+    is_headless = args.headless or (os.environ.get("HEADLESS") == "1") or (os.environ.get("DOCKER") == "1")
+
+    if is_headless:
+        print("=" * 64)
+        print("  [+] JARVIS HEADLESS SERVER MODE (Docker / Server / Cloud)")
+        print("  Connect your phone or browser at: http://0.0.0.0:8000")
+        print("=" * 64)
+        from core.headless_ui import HeadlessUI
+        ui = HeadlessUI()
         ui.wait_for_api_key()
         jarvis = JarvisLive(ui)
+        jarvis.headless = True
         try:
             asyncio.run(jarvis.run())
         except KeyboardInterrupt:
-            print("\n🔴 Shutting down...")
+            print("\n[!] Shutting down...")
+    else:
+        from ui import JarvisUI
+        ui = JarvisUI("face.png")
 
-    threading.Thread(target=runner, daemon=True).start()
-    ui.root.mainloop()
+        def runner():
+            ui.wait_for_api_key()
+            jarvis = JarvisLive(ui)
+            jarvis.headless = False
+            try:
+                asyncio.run(jarvis.run())
+            except KeyboardInterrupt:
+                print("\n🔴 Shutting down...")
+            finally:
+                pass
+
+        threading.Thread(target=runner, daemon=True).start()
+        ui.root.mainloop()
 
 if __name__ == "__main__":
     main()
+

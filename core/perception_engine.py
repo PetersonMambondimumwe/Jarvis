@@ -5,9 +5,16 @@ import os
 import json
 import base64
 from pathlib import Path
-from datetime import datetime
-import pyautogui
-import mss
+try:
+    import pyautogui
+except Exception:
+    pyautogui = None
+
+try:
+    import mss
+except Exception:
+    mss = None
+
 from PIL import Image
 from google import genai
 from google.genai import types as gtypes
@@ -38,8 +45,8 @@ class PerceptionEngine:
             "screen_text": "",
             "confidence": 0.0
         }
-        self.fps = 10  # Target FPS for capture
-        self.analysis_interval = 2.0  # Seconds between deep AI analysis
+        self.fps = 5  # Reduced FPS for lighter capture
+        self.analysis_interval = 10.0  # Increased interval to 10s to avoid rate limits
         self.last_analysis_time = 0
         self._lock = threading.Lock()
         
@@ -138,7 +145,7 @@ class PerceptionEngine:
             )
 
             response = self.client.models.generate_content(
-                model="gemini-2.5-flash-lite",
+                model="gemini-1.5-flash",
                 contents=[
                     gtypes.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
                     prompt,

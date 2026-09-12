@@ -43,6 +43,8 @@ def _gemini_client():
 
 
 def _detect_type(path: Path) -> str:
+    if path.is_dir():
+        return "directory"
     ext = path.suffix.lower().lstrip(".")
     image_exts = {"jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "svg", "ico"}
     video_exts = {"mp4", "avi", "mov", "mkv", "wmv", "flv", "webm", "m4v", "3gp"}
@@ -776,6 +778,104 @@ def _process_pptx(path: Path, action: str, params: dict, speak=None) -> str:
 
     return f"Unknown PPTX action: '{action}'. Try: summarize, extract_text, analyze"
 
+
+def _process_directory(path: Path, action: str, params: dict, speak=None) -> str:
+    action = action or "list"
+
+    if action in ("list", "info"):
+        try:
+            items = list(path.iterdir())
+            files = [i for i in items if i.is_file()]
+            dirs = [i for i in items if i.is_dir()]
+
+            out = f"Folder: {path.name}\n"
+            out += f"Path: {path}\n"
+            out += f"Contains {len(dirs)} subfolders and {len(files)} files.\n\n"
+
+            if dirs:
+                out += "Subfolders:\n"
+                for d in sorted(dirs)[:30]:
+                    out += f"  [DIR]  {d.name}/\n"
+            if files:
+                out += "\nFiles:\n"
+                for f in sorted(files)[:50]:
+                    size = _file_size_str(f)
+                    out += f"  [FILE] {f.name} ({size})\n"
+            return out
+        except Exception as e:
+            return f"Failed to list folder: {e}"
+
+    elif action in ("summarize", "analyze", "read"):
+        instruction = params.get("instruction", "").lower()
+
+        # Target extensions to read (R code, PDFs, Python, text docs, etc.)
+        target_exts = {".r", ".py", ".txt", ".md", ".csv", ".json", ".xml", ".pdf"}
+
+        # If user explicitly specifies a type, filter by it
+        if "pdf" in instruction:
+            target_exts = {".pdf"}
+        elif "r code" in instruction or "r script" in instruction or " r " in instruction:
+            target_exts = {".r"}
+
+        try:
+            files = []
+            for f in path.rglob('*'):
+                if f.is_file() and f.suffix.lower() in target_exts:
+                    files.append(f)
+
+            if not files:
+                return f"No matching files ({', '.join(target_exts)}) found in this folder."
+
+            out = f"Folder analysis for: {path.name}\n"
+            out += f"Found {len(files)} target files to read.\n\n"
+
+            read_count = 0
+            for f in sorted(files)[:12]: # Read top 12 matching files to avoid context limit
+                out += f"--- FILE: {f.name} ---\n"
+                content = ""
+                if f.suffix.lower() == ".pdf":
+                    try:
+                        import pdfplumber
+                        with pdfplumber.open(f) as pdf:
+                            for page in pdf.pages[:5]: # limit pages
+                                content += (page.extract_text() or "") + "\n"
+                    except Exception:
+                        try:
+                            import PyPDF2
+                            with open(f, "rb") as pdf_f:
+                                reader = PyPDF2.PdfReader(pdf_f)
+                                for page in reader.pages[:5]:
+                                    content += page.extract_text() + "\n"
+                        except Exception:
+                            content = "[Could not read PDF content]"
+                    content = content[:15000]
+                else:
+                    try:
+                        content = f.read_text(encoding="utf-8", errors="replace")[:10000]
+                    except Exception as e:
+                        content = f"[Error reading file: {e}]"
+
+                out += content + "\n\n"
+                read_count += 1
+
+            prompt = (
+                f"Analyze the contents of these files in folder '{path.name}'. "
+                f"Provide a concise summary, key points, or address this instruction: {instruction or 'summarize'}\n\n"
+                f"{out}"
+            )
+            try:
+                model = _gemini_client()
+                response = model.generate_content(prompt)
+                return response.text.strip()
+            except Exception as e:
+                return f"AI analysis failed: {e}\n\nAggregate content was:\n{out[:2000]}"
+
+        except Exception as e:
+            return f"Failed to read folder files: {e}"
+
+    return f"Unknown directory action: '{action}'. Try: list, summarize"
+
+
 def file_processor(parameters: dict, player=None, speak=None) -> str:
     file_path_str = parameters.get("file_path", "").strip()
     if not file_path_str:
@@ -783,9 +883,9 @@ def file_processor(parameters: dict, player=None, speak=None) -> str:
 
     path = Path(file_path_str)
     if not path.exists():
-        return f"File not found: {file_path_str}"
-    if not path.is_file():
-        return f"Path is not a file: {file_path_str}"
+        return f"File or folder not found: {file_path_str}"
+    if not path.is_file() and not path.is_dir():
+        return f"Path is neither a file nor a folder: {file_path_str}"
 
     file_type   = _detect_type(path)
     action      = (parameters.get("action") or "").lower().strip()
@@ -808,19 +908,20 @@ def file_processor(parameters: dict, player=None, speak=None) -> str:
             return f"Unknown file type ({path.suffix}). Could not process: {e}"
 
     dispatch = {
-        "image":   _process_image,
-        "pdf":     _process_pdf,
-        "docx":    lambda p, a, pm, s: _process_text_doc(p, "docx", a, pm, s),
-        "text":    lambda p, a, pm, s: _process_text_doc(p, "text", a, pm, s),
-        "csv":     lambda p, a, pm, s: _process_data(p, "csv",   a, pm, s),
-        "excel":   lambda p, a, pm, s: _process_data(p, "excel", a, pm, s),
-        "json":    _process_json,
-        "xml":     lambda p, a, pm, s: _process_json(p, a, pm, s),  
-        "code":    _process_code,
-        "audio":   _process_audio,
-        "video":   _process_video,
-        "archive": _process_archive,
-        "pptx":    _process_pptx,
+        "image":     _process_image,
+        "pdf":       _process_pdf,
+        "docx":      lambda p, a, pm, s: _process_text_doc(p, "docx", a, pm, s),
+        "text":      lambda p, a, pm, s: _process_text_doc(p, "text", a, pm, s),
+        "csv":       lambda p, a, pm, s: _process_data(p, "csv",   a, pm, s),
+        "excel":     lambda p, a, pm, s: _process_data(p, "excel", a, pm, s),
+        "json":      _process_json,
+        "xml":       lambda p, a, pm, s: _process_json(p, a, pm, s),
+        "code":      _process_code,
+        "audio":     _process_audio,
+        "video":     _process_video,
+        "archive":   _process_archive,
+        "pptx":      _process_pptx,
+        "directory": _process_directory,
     }
 
     handler = dispatch.get(file_type)

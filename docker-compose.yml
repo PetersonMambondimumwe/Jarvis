@@ -1,0 +1,25 @@
+services:
+  jarvis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jarvis-server
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist configuration and memory data on your host server
+      - ./config:/app/config
+      - ./memory:/app/memory
+      - ./uploads:/app/uploads
+      - ./.antigravity_bridge:/app/.antigravity_bridge
+      - ./core:/app/core
+      - ./dashboard:/app/dashboard
+      - ./actions:/app/actions
+      - ./main.py:/app/main.py
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HEADLESS=1
+      - DISPLAY=:99
+    # IPC and shm configuration for high-throughput audio queues
+    shm_size: '512m'

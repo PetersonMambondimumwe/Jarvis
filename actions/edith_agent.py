@@ -22,7 +22,7 @@ def _base_dir() -> Path:
 
 
 CONFIG_PATH = _base_dir() / "config" / "api_keys.json"
-DEFAULT_TIMEOUT = 30
+DEFAULT_TIMEOUT = 90
 
 
 @dataclass(frozen=True)
@@ -104,7 +104,7 @@ def _load_edith_config() -> EdithConfig:
         chat_url=chat_url,
         conversation_id=conversation_id,
         agent_name=_first_config_value(cfg, "base44_agent_name", "edith_agent_name") or "edith",
-        timeout=max(5, min(timeout, 120)),
+        timeout=max(5, min(timeout, 180)),
         app_id=_first_config_value(cfg, "base44_app_id"),
     )
 
@@ -219,6 +219,7 @@ def _build_payload(action: str, task: str, session_memory: dict | None) -> dict[
 def _headers(config: EdithConfig) -> dict[str, str]:
     return {
         "api_key": config.api_key,
+        "x-api-key": config.api_key,
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": "Jarvis-Mark-XLVIII/edith-orchestrator",
@@ -341,14 +342,20 @@ def _call_base44_agent_api(
         return "Sir, EDITH agent API base must be an HTTPS URL. Please update base44_edith_agent_api_base.", None
 
     if action == "verify":
-        response = requests.get(
-            config.agent_api_base,
-            headers=_headers(config),
-            timeout=config.timeout,
+        conversation_id = config.conversation_id
+        if not conversation_id:
+            conversation_id, error = _create_conversation(config)
+            if error:
+                return error, None
+        response = _post_agent_message(
+            config,
+            conversation_id,
+            "Jarvis connectivity check. Reply with a concise EDITH status.",
         )
         if response.status_code >= 400:
-            return _handle_http_error(response), None
-        return f"EDITH connection verified. Agent API responded: {_response_text(response)}", None
+            return _handle_http_error(response), conversation_id
+        text = _response_text(response)
+        return f"EDITH connection verified. Message endpoint responded: {text}", conversation_id
 
     conversation_id = config.conversation_id
     if not conversation_id:
@@ -452,25 +459,24 @@ def edith_agent(
     _log(player, f"[EDITH] Delegating via Base44 {mode} ({config.agent_name}).")
 
     if action == "delegate" and task_manager:
-        initial_response_text = ""
-        conversation_id = None
-        try:
-            if config.agent_api_base:
-                initial_response_text, conversation_id = _call_base44_agent_api(config=config, action=action, task=task)
-            else:
-                initial_response_text, conversation_id = _call_edith_endpoint(config=config, action=action, task=task, session_memory=session_memory if isinstance(session_memory, dict) else {})
-        except Exception as e:
-            return f"Sir, failed to delegate task to EDITH: {e}"
+        conversation_id = config.conversation_id
+        if not conversation_id:
+            try:
+                # Create conversation (fast call, usually <1 second since config returns cached conversation id if present)
+                conversation_id, error = _create_conversation(config)
+                if error:
+                    conversation_id = _fallback_conversation_id()
+            except Exception:
+                conversation_id = _fallback_conversation_id()
 
-        if conversation_id:
-            task_manager.delegate_task(
-                task_description=task,
-                conversation_id=conversation_id,
-                initial_message=initial_response_text,
-            )
-            return f"Sir, I have delegated your task to EDITH (ID: {conversation_id}). I will notify you when it\'s complete. Initial response: {initial_response_text}"
-        else:
-            return initial_response_text or "Sir, I delegated the task to EDITH, but could not get a conversation ID to track it. I will try to get the result later."
+        task_manager.delegate_task_async(
+            task_description=task,
+            conversation_id=conversation_id,
+            edith_config=config,
+            task=task,
+            session_memory=session_memory if isinstance(session_memory, dict) else {},
+        )
+        return f"I've tasked EDITH with {task}. I'll alert you as soon as she's done."
 
     else:
         if config.agent_api_base:

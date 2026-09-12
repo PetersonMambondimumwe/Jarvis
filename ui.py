@@ -649,7 +649,8 @@ _FILE_ICONS = {
     "word":    ("📝", "#4488ff"), "excel":   ("📊", "#44bb44"),
     "code":    ("💻", "#ffcc00"), "archive": ("📦", "#ff8844"),
     "pptx":    ("📊", "#ff6622"), "text":    ("📃", "#aaaaaa"),
-    "data":    ("🔧", "#88ddff"), "unknown": ("📎", "#888888"),
+    "data":    ("🔧", "#88ddff"), "folder":  ("📁", "#5bc0de"),
+    "unknown": ("📎", "#888888"),
 }
 _EXT_TO_CAT = {
     **dict.fromkeys(["jpg","jpeg","png","gif","webp","bmp","tiff","svg","ico"], "image"),
@@ -667,6 +668,8 @@ _EXT_TO_CAT = {
 }
 
 def _file_category(path: Path) -> str:
+    if path.is_dir():
+        return "folder"
     return _EXT_TO_CAT.get(path.suffix.lower().lstrip("."), "unknown")
 
 def _fmt_size(size: int) -> str:
@@ -714,13 +717,40 @@ class FileDropZone(QWidget):
         urls = e.mimeData().urls()
         if urls:
             path = urls[0].toLocalFile()
-            if Path(path).is_file():
+            p = Path(path)
+            if p.is_file() or p.is_dir():
                 self._set_file(path)
         self._canvas.update()
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
-            self._browse()
+            from PyQt6.QtWidgets import QMenu
+            menu = QMenu(self)
+            menu.setStyleSheet(f"""
+                QMenu {{
+                    background-color: {C.PANEL};
+                    color: {C.TEXT};
+                    border: 1px solid {C.BORDER};
+                    font-family: 'Courier New';
+                    font-size: 11px;
+                }}
+                QMenu::item {{
+                    padding: 4px 18px;
+                }}
+                QMenu::item:selected {{
+                    background-color: {C.PRI_DIM};
+                    color: {C.WHITE};
+                }}
+            """)
+            action_file = menu.addAction("📎  Upload File...")
+            action_dir  = menu.addAction("📁  Upload Folder...")
+
+            pos = e.globalPosition().toPoint()
+            action = menu.exec(pos)
+            if action == action_file:
+                self._browse_file()
+            elif action == action_dir:
+                self._browse_folder()
 
     def enterEvent(self, e):
         self._hovering = True; self._canvas.update()
@@ -734,17 +764,24 @@ class FileDropZone(QWidget):
     def clear_file(self):
         self._current_file = None; self._canvas.update()
 
-    def _browse(self):
+    def _browse_file(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select a file for JARVIS", str(Path.home()),
             "All Files (*.*);;"
             "Images (*.jpg *.jpeg *.png *.gif *.webp *.bmp *.svg);;"
             "Documents (*.pdf *.docx *.txt *.md *.pptx);;"
             "Data (*.csv *.xlsx *.json *.xml);;"
-            "Code (*.py *.js *.ts *.html *.css *.java *.cpp *.go);;"
+            "Code (*.py *.js *.ts *.html *.css *.java *.cpp *.go *.r);;"
             "Audio (*.mp3 *.wav *.ogg *.m4a *.aac *.flac);;"
             "Video (*.mp4 *.avi *.mov *.mkv *.wmv *.webm);;"
             "Archives (*.zip *.rar *.tar *.gz *.7z)",
+        )
+        if path:
+            self._set_file(path)
+
+    def _browse_folder(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Select a folder for JARVIS", str(Path.home())
         )
         if path:
             self._set_file(path)
@@ -816,8 +853,19 @@ class _DropCanvas(QWidget):
         path = Path(self._z._current_file)
         cat  = _file_category(path)
         icon, icon_col = _FILE_ICONS.get(cat, _FILE_ICONS["unknown"])
-        size_str = _fmt_size(path.stat().st_size)
-        ext_str  = path.suffix.upper().lstrip(".") or "FILE"
+
+        if path.is_dir():
+            try:
+                files = [f for f in path.rglob('*') if f.is_file()]
+                num_files = len(files)
+                total_size = sum(f.stat().st_size for f in files)
+                size_str = f"{_fmt_size(total_size)} ({num_files} files)"
+            except Exception:
+                size_str = "folder"
+            ext_str  = "FOLDER"
+        else:
+            size_str = _fmt_size(path.stat().st_size)
+            ext_str  = path.suffix.upper().lstrip(".") or "FILE"
 
         block_x, block_w = 10, 60
         p.setFont(QFont("Segoe UI Emoji", 22) if _OS == "Windows" else QFont("Arial", 22))
@@ -2246,16 +2294,36 @@ class MainWindow(QMainWindow):
         p    = Path(path)
         cat  = _file_category(p)
         icon, _ = _FILE_ICONS.get(cat, _FILE_ICONS["unknown"])
-        size = _fmt_size(p.stat().st_size)
-        self._file_hint.setText(f"{icon}  {p.name}  ·  {size}  ·  Tell JARVIS what to do with it")
-        self._log.append_log(f"FILE: {p.name} ({size}) loaded")
+
+        if p.is_dir():
+            try:
+                files = [f for f in p.rglob('*') if f.is_file()]
+                num_files = len(files)
+                total_size = sum(f.stat().st_size for f in files)
+                size = f"{_fmt_size(total_size)} ({num_files} files)"
+            except Exception:
+                size = "folder"
+            self._file_hint.setText(f"{icon}  {p.name}  ·  {size}  ·  Tell JARVIS what to do with this folder")
+            self._log.append_log(f"FOLDER: {p.name} ({size}) loaded")
+        else:
+            size = _fmt_size(p.stat().st_size)
+            self._file_hint.setText(f"{icon}  {p.name}  ·  {size}  ·  Tell JARVIS what to do with it")
+            self._log.append_log(f"FILE: {p.name} ({size}) loaded")
+
         if self.on_text_command:
-            msg = (
-                f"[FILE_UPLOADED] path={path} | name={p.name} | "
-                f"type={p.suffix.lstrip('.')} | size={size} | "
-                f"Briefly tell the user you can see the file '{p.name}' "
-                f"({size}) has been uploaded and ask what they'd like to do with it."
-            )
+            if p.is_dir():
+                msg = (
+                    f"[FOLDER_UPLOADED] path={path} | name={p.name} | size={size} | "
+                    f"Briefly tell the user you can see the folder '{p.name}' "
+                    f"({size}) has been loaded and ask what they'd like to do with the files inside it."
+                )
+            else:
+                msg = (
+                    f"[FILE_UPLOADED] path={path} | name={p.name} | "
+                    f"type={p.suffix.lstrip('.')} | size={size} | "
+                    f"Briefly tell the user you can see the file '{p.name}' "
+                    f"({size}) has been uploaded and ask what they'd like to do with it."
+                )
             threading.Thread(target=self.on_text_command, args=(msg,), daemon=True).start()
 
     def notify_phone_connected(self) -> None:
@@ -2335,12 +2403,27 @@ class MainWindow(QMainWindow):
 
 
     def show_window(self):
-        """Bring Jarvis to the front and ensure it is visible."""
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-        self.show()
-        self.raise_()
-        self.activateWindow()
-        self._log.append_log("SYS: Voice wake triggered.")
+        """Bring Jarvis to the front, unminimize, and ensure it is visible and listening."""
+        from PyQt6.QtCore import QTimer, Qt
+
+        def _do_show():
+            try:
+                self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized | Qt.WindowState.WindowActive)
+                self.showNormal()
+                self.show()
+                self.raise_()
+                self.activateWindow()
+                if getattr(self, "muted", False):
+                    self.muted = False
+                    if hasattr(self, "_mute_btn"):
+                        self._mute_btn.setText("MUTE")
+                    self.set_state("LISTENING")
+                self._log.append_log("SYS: Voice wake triggered -- JARVIS active.")
+            except Exception as e:
+                print(f"[UI] Error showing window: {e}")
+
+        # Thread-safe dispatch to main Qt GUI event loop
+        QTimer.singleShot(0, _do_show)
 
     def _apply_state(self, state: str):
         self.hud.state    = state

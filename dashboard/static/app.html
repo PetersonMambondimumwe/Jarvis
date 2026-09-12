@@ -138,6 +138,7 @@
   <header>
     <div class="logo"><em>J</em>ARVIS</div>
     <div class="pill" id="pill"><span class="dot"></span><span id="st">Connecting</span></div>
+    <button class="pill on" id="tts-toggle" onclick="toggleTTS()" style="cursor:pointer;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:var(--green);" title="Toggle voice output">🔊 <span id="tts-txt">VOICE ON</span></button>
     <div class="enc-badge" id="enc">AES-256</div>
     <div class="spacer"></div>
     <div class="url">__IP__:__PORT__</div>
@@ -210,12 +211,65 @@
     const _wsUrl   = `${_wsProto}://${location.host}/ws?token=${encodeURIComponent(_authToken)}`;
     const ws       = new WebSocket(_wsUrl);
 
-    ws.onopen    = () => { sys('Remote session active.'); toast('Connected to JARVIS'); };
-    ws.onclose   = () => sys('Connection lost — refresh to reconnect.');
-    ws.onerror   = () => sys('Connection error.');
+    ws.onopen    = () => { setStatus('starting'); sys('Dashboard connected. Waiting for JARVIS session...'); toast('Connected to dashboard'); };
+    ws.onclose   = (e) => {
+      if (e.code === 4001) {
+        sessionStorage.removeItem('jarvis_token');
+        location.replace('/auto-login?key=JARVIS');
+        return;
+      }
+      setStatus('offline');
+      sys('Connection lost — refresh to reconnect.');
+    };
+    ws.onerror   = () => { setStatus('error'); sys('Connection error.'); };
+    let _ttsEnabled = true;
+    function toggleTTS() {
+      _ttsEnabled = !_ttsEnabled;
+      const btn = document.getElementById('tts-toggle');
+      const txt = document.getElementById('tts-txt');
+      if (_ttsEnabled) {
+        btn.style.background = 'rgba(34,197,94,0.1)';
+        btn.style.borderColor = 'rgba(34,197,94,0.3)';
+        btn.style.color = 'var(--green)';
+        txt.textContent = 'VOICE ON';
+        _ensureAudioCtx();
+        toast('Voice output active');
+      } else {
+        btn.style.background = 'var(--surface)';
+        btn.style.borderColor = 'var(--border)';
+        btn.style.color = 'var(--muted)';
+        txt.textContent = 'VOICE MUTED';
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+        toast('Voice output muted');
+      }
+    }
+
+    function _speakTTS(rawText) {
+      if (!_ttsEnabled || !window.speechSynthesis) return;
+      try {
+        const clean = rawText.replace(/^Jarvis:\s*/i, '').replace(/<[^>]+>/g, '').trim();
+        if (!clean) return;
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(clean);
+        u.rate = 1.0;
+        u.pitch = 1.0;
+        const voices = window.speechSynthesis.getVoices();
+        const enVoice = voices.find(v => (v.lang.startsWith('en')) && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Daniel') || v.name.includes('Oliver') || v.name.includes('Male')));
+        if (enVoice) u.voice = enVoice;
+        window.speechSynthesis.speak(u);
+      } catch (_) {}
+    }
+
+    let _lastLog = { speaker: null, text: null, ts: 0 };
+
     ws.onmessage = (e) => {
       const m = JSON.parse(e.data);
-      if (m.type === 'log')           append(m.speaker, m.text);
+      if (m.type === 'log') {
+        const added = append(m.speaker, m.text);
+        if (m.speaker === 'jarvis' && added) {
+          _speakTTS(m.text);
+        }
+      }
       if (m.type === 'status')        setStatus(m.state);
       if (m.type === 'wake')          sys('Wake word detected — connecting…');
       if (m.type === 'sys')           sys(m.text);
@@ -225,25 +279,47 @@
     function setStatus(s) {
       if (s === 'active') {
         pill.className = 'pill on'; stTxt.textContent = 'Active'; wake.classList.remove('show');
+      } else if (s === 'starting') {
+        pill.className = 'pill'; stTxt.textContent = 'Starting'; wake.classList.remove('show');
+      } else if (s === 'offline') {
+        pill.className = 'pill'; stTxt.textContent = 'Offline'; wake.classList.add('show');
+      } else if (s === 'error') {
+        pill.className = 'pill'; stTxt.textContent = 'Error'; wake.classList.add('show');
       } else {
         pill.className = 'pill'; stTxt.textContent = 'Sleeping'; wake.classList.add('show');
       }
     }
 
     function append(speaker, text) {
+      let clean = (text || '').trim();
+      if (speaker === 'jarvis' && clean.toLowerCase().startsWith('jarvis:')) {
+        clean = clean.substring(7).trim();
+      } else if (speaker === 'user' && clean.toLowerCase().startsWith('you:')) {
+        clean = clean.substring(4).trim();
+      }
+      if (!clean) return false;
+
+      const now = Date.now();
+      if (_lastLog.speaker === speaker && _lastLog.text === clean && (now - _lastLog.ts < 3500)) {
+        return false;
+      }
+      _lastLog = { speaker, text: clean, ts: now };
+
       const d = document.createElement('div');
       if (speaker === 'jarvis') {
         d.className = 'msg msg-j';
-        d.innerHTML = `<div class="lbl">Jarvis</div>${esc(text)}`;
+        d.innerHTML = `<div class="lbl">Jarvis</div>${esc(clean)}`;
       } else {
         d.className = 'msg msg-u';
-        d.innerHTML = `<div class="lbl">You</div>${esc(text)}`;
+        d.innerHTML = `<div class="lbl">You</div>${esc(clean)}`;
       }
       feed.appendChild(d);
       feed.scrollTop = feed.scrollHeight;
+      return true;
     }
 
     function sys(text) {
+      if (!text || text.startsWith('[Web]:') || text.startsWith('You:') || text.startsWith('Jarvis:')) return;
       const d = document.createElement('div');
       d.className = 'msg msg-sys'; d.textContent = text;
       feed.appendChild(d); feed.scrollTop = feed.scrollHeight;
@@ -462,8 +538,27 @@
       });
     }
 
+    function _ensureAudioCtx() {
+      if (!_audioCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        _audioCtx = new AC();
+      }
+      if (_audioCtx.state === 'suspended') {
+        try { _audioCtx.resume(); } catch (_) {}
+      }
+      return _audioCtx;
+    }
+    document.addEventListener('click', () => { _ensureAudioCtx(); }, { once: false });
+    document.addEventListener('touchstart', () => { _ensureAudioCtx(); }, { once: false });
+
     async function doMic() {
       if (_voiceWs) { _stopVoice(); return; }
+
+      // Synchronously unlock AudioContext on direct user tap
+      const ctx = _ensureAudioCtx();
+      if (ctx.state === 'suspended') {
+        try { await ctx.resume(); } catch (_) {}
+      }
 
       if (!navigator.mediaDevices?.getUserMedia) {
         _showVoiceSetup();
@@ -480,12 +575,6 @@
           : 'Mic error: ' + e.message);
         return;
       }
-
-      // 16 kHz context (fall back to native rate — _f32toPcm16 resamples)
-      let ctx;
-      try { ctx = new AudioContext({ sampleRate: 16000 }); }
-      catch (_) { ctx = new AudioContext(); }
-      if (ctx.state === 'suspended') await ctx.resume();
 
       const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(
@@ -520,12 +609,13 @@
           src.connect(nd);
           _audioNd = nd;
         } catch (_) {
-          // ScriptProcessor fallback (deprecated, still works everywhere)
+          // ScriptProcessor fallback
           const sp = ctx.createScriptProcessor(4096, 1, 1);
           sp.onaudioprocess = e => {
             if (ws.readyState === 1) ws.send(_f32toPcm16(e.inputBuffer.getChannelData(0), rate));
           };
-          src.connect(sp); sp.connect(ctx.destination);
+          src.connect(sp);
+          // Do NOT connect to ctx.destination to avoid local mic echo
           _audioNd = sp;
         }
 
@@ -536,17 +626,51 @@
         toast('🎤 Live');
       };
 
+      // Playback audio returned from Jarvis (24 kHz PCM from Gemini Live)
+      let _playTime = 0;
+      ws.onmessage = async (e) => {
+        let arrayBuf = e.data;
+        if (e.data instanceof Blob) {
+          arrayBuf = await e.data.arrayBuffer();
+        }
+        if (arrayBuf instanceof ArrayBuffer && arrayBuf.byteLength > 0) {
+          try {
+            if (window.speechSynthesis) window.speechSynthesis.cancel();
+            if (ctx.state === 'suspended') await ctx.resume();
+
+            const byteLen = arrayBuf.byteLength - (arrayBuf.byteLength % 2);
+            const pcm16 = new Int16Array(arrayBuf, 0, byteLen / 2);
+            const f32 = new Float32Array(pcm16.length);
+            for (let i = 0; i < pcm16.length; i++) {
+              f32[i] = pcm16[i] / 32768.0;
+            }
+
+            const buf = ctx.createBuffer(1, f32.length, 24000);
+            buf.getChannelData(0).set(f32);
+
+            const src = ctx.createBufferSource();
+            src.buffer = buf;
+            src.connect(ctx.destination);
+
+            const now = ctx.currentTime;
+            if (_playTime < now) _playTime = now;
+            src.start(_playTime);
+            _playTime += buf.duration;
+          } catch (err) {
+            console.error('Audio playback error:', err);
+          }
+        }
+      };
+
       ws.onclose = () => { _stopVoice(); };
       ws.onerror = () => { sys('Voice connection failed.'); _stopVoice(); };
 
       _voiceWs  = ws;
-      _audioCtx = ctx;
       _micStm   = stream;
     }
 
     function _stopVoice() {
       if (_audioNd)  { try { _audioNd.disconnect(); }  catch (_) {}; _audioNd  = null; }
-      if (_audioCtx) { try { _audioCtx.close(); }      catch (_) {}; _audioCtx = null; }
       if (_micStm)   { _micStm.getTracks().forEach(t => t.stop()); _micStm = null; }
       if (_voiceWs)  {
         const w = _voiceWs; _voiceWs = null;

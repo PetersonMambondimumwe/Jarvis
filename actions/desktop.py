@@ -12,11 +12,11 @@ from datetime import datetime
 try:
     import pyautogui
     _PYAUTOGUI = True
-except ImportError:
+except Exception:
+    pyautogui = None
     _PYAUTOGUI = False
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
-
 
 def _get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
