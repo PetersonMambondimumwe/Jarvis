@@ -31,6 +31,124 @@
       display: flex; flex-direction: column; overflow: hidden;
     }
 
+        /* ── MOBILE RESPONSIVENESS & SAFE AREAS ── */
+    html, body {
+      height: 100%;
+      height: 100dvh;
+      overflow: hidden;
+      touch-action: manipulation;
+    }
+
+    header {
+      padding-top: max(12px, env(safe-area-inset-top));
+      padding-left: max(12px, env(safe-area-inset-left));
+      padding-right: max(12px, env(safe-area-inset-right));
+    }
+
+    footer {
+      padding-bottom: max(12px, env(safe-area-inset-bottom));
+      padding-left: max(12px, env(safe-area-inset-left));
+      padding-right: max(12px, env(safe-area-inset-right));
+    }
+
+    /* ── INSTALL MODAL ── */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.78); backdrop-filter: blur(8px);
+      display: none; align-items: center; justify-content: center; z-index: 1000;
+      padding: 16px; animation: pop 0.18s ease;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal-card {
+      background: #0b0f19; border: 1px solid rgba(99,102,241,0.35); border-radius: 20px;
+      width: 100%; max-width: 440px; padding: 22px; box-shadow: 0 20px 50px rgba(0,0,0,0.85);
+    }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .modal-title { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: 0.5px; }
+    .modal-close { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; padding: 4px; line-height: 1; }
+    .modal-close:hover { color: #fff; }
+    .modal-sub { font-size: 12px; color: var(--muted); line-height: 1.5; margin-bottom: 18px; }
+    .install-tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+    .tab-btn {
+      flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent;
+      background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+    }
+    .tab-btn.active { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.4); color: #818cf8; }
+    .tab-content { display: none; flex-direction: column; gap: 12px; }
+    .tab-content.active { display: flex; }
+    .install-step { display: flex; align-items: flex-start; gap: 12px; }
+    .step-num {
+      width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff;
+      font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
+    }
+    .step-txt { font-size: 13px; line-height: 1.5; color: var(--text); }
+    .badge-icon { background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 4px; font-size: 12px; font-family: monospace; }
+
+    @media (max-width: 640px) {
+      header {
+        padding: 10px 12px;
+        padding-top: max(10px, env(safe-area-inset-top));
+        gap: 6px;
+      }
+      .logo {
+        font-size: 13px;
+        letter-spacing: 2px;
+      }
+      .url {
+        display: none !important;
+      }
+      .enc-badge {
+        display: none !important;
+      }
+      .pill {
+        padding: 5px 8px;
+        font-size: 9px;
+        letter-spacing: 1px;
+      }
+      #tts-txt {
+        display: none;
+      }
+      #tts-toggle {
+        padding: 5px 8px;
+      }
+      #install-btn {
+        display: inline-flex !important;
+        padding: 5px 9px;
+        font-size: 10px;
+        letter-spacing: 1px;
+      }
+      main {
+        padding: 12px 10px 6px;
+        gap: 8px;
+      }
+      .msg {
+        max-width: 92%;
+        font-size: 14px;
+        line-height: 1.5;
+        padding: 10px 13px;
+        border-radius: 14px;
+      }
+      footer {
+        padding: 8px 10px;
+        padding-bottom: max(10px, env(safe-area-inset-bottom));
+        gap: 6px;
+      }
+      #inp {
+        font-size: 16px !important;
+        padding: 10px 12px;
+        border-radius: 10px;
+      }
+      .btn {
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-size: 11px;
+      }
+      #mic-btn, .btn-attach {
+        padding: 10px 12px;
+        font-size: 16px;
+        border-radius: 10px;
+      }
+    }
+
     /* ── HEADER ── */
     header {
       flex-shrink: 0; display: flex; align-items: center; gap: 10px;
@@ -142,11 +260,58 @@
 </head>
 <body>
   <div id="toast"></div>
+
+  <!-- PWA INSTALL MODAL -->
+  <div id="install-modal" class="modal-backdrop" onclick="if(event.target === this) closeInstallModal()">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">📲 Install JARVIS App</div>
+        <button class="modal-close" onclick="closeInstallModal()">✕</button>
+      </div>
+      <p class="modal-sub">Install JARVIS on your phone for a full-screen standalone HUD, direct mic access, and zero address bar clutter.</p>
+
+      <div class="install-tabs">
+        <button id="tab-btn-ios" class="tab-btn active" onclick="showInstallTab('ios')">🍎 iPhone / iPad</button>
+        <button id="tab-btn-android" class="tab-btn" onclick="showInstallTab('android')">🤖 Android / Chrome</button>
+      </div>
+
+      <div id="tab-content-ios" class="tab-content active">
+        <div class="install-step">
+          <div class="step-num">1</div>
+          <div class="step-txt">Tap the <strong>Share</strong> button at the bottom of Safari (the square with an arrow: <span class="badge-icon">⎋</span>).</div>
+        </div>
+        <div class="install-step">
+          <div class="step-num">2</div>
+          <div class="step-txt">Scroll down the options and tap <strong>"Add to Home Screen"</strong> (<span class="badge-icon">➕</span>).</div>
+        </div>
+        <div class="install-step">
+          <div class="step-num">3</div>
+          <div class="step-txt">Tap <strong>"Add"</strong> in the top-right corner. JARVIS will appear as a standalone app on your home screen!</div>
+        </div>
+      </div>
+
+      <div id="tab-content-android" class="tab-content">
+        <div class="install-step">
+          <div class="step-num">1</div>
+          <div class="step-txt">Tap the <strong>three vertical dots (⋮)</strong> in the top-right corner of Chrome.</div>
+        </div>
+        <div class="install-step">
+          <div class="step-num">2</div>
+          <div class="step-txt">Tap <strong>"Install app"</strong> or <strong>"Add to Home screen"</strong>.</div>
+        </div>
+        <div class="install-step">
+          <div class="step-num">3</div>
+          <div class="step-txt">Confirm by tapping <strong>"Install"</strong>. JARVIS will be added to your app drawer!</div>
+        </div>
+        <button id="native-install-btn" class="btn btn-send" onclick="triggerNativeInstall()" style="width:100%;margin-top:14px;padding:12px;font-size:12px;display:none;">⚡ Install Directly Now</button>
+      </div>
+    </div>
+  </div>
   <header>
     <div class="logo"><em>J</em>ARVIS</div>
     <div class="pill" id="pill"><span class="dot"></span><span id="st">Connecting</span></div>
     <button class="pill on" id="tts-toggle" onclick="toggleTTS()" style="cursor:pointer;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:var(--green);" title="Toggle voice output">🔊 <span id="tts-txt">VOICE ON</span></button>
-    <button class="pill" id="install-btn" onclick="installPWA()" style="display:none;cursor:pointer;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);color:#818cf8;" title="Install JARVIS App">📲 INSTALL</button>
+    <button class="pill" id="install-btn" onclick="openInstallModal()" style="display:inline-flex;cursor:pointer;background:rgba(99,102,241,0.18);border:1px solid rgba(99,102,241,0.4);color:#818cf8;font-weight:700;" title="Install JARVIS App">📲 INSTALL</button>
     <div class="enc-badge" id="enc">AES-256</div>
     <div class="spacer"></div>
     <div class="url">__IP__:__PORT__</div>
@@ -177,7 +342,45 @@
       if (btn) btn.style.display = 'flex';
     });
 
+    function openInstallModal() {
+      document.getElementById('install-modal').classList.add('open');
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      showInstallTab(isIOS ? 'ios' : 'android');
+      if (_deferredInstallPrompt) {
+        const nb = document.getElementById('native-install-btn');
+        if (nb) nb.style.display = 'block';
+      }
+    }
+
+    function closeInstallModal() {
+      document.getElementById('install-modal').classList.remove('open');
+    }
+
+    function showInstallTab(type) {
+      document.getElementById('tab-btn-ios').classList.toggle('active', type === 'ios');
+      document.getElementById('tab-btn-android').classList.toggle('active', type === 'android');
+      document.getElementById('tab-content-ios').classList.toggle('active', type === 'ios');
+      document.getElementById('tab-content-android').classList.toggle('active', type === 'android');
+    }
+
+    function triggerNativeInstall() {
+      if (_deferredInstallPrompt) {
+        _deferredInstallPrompt.prompt();
+        _deferredInstallPrompt.userChoice.then((choice) => {
+          if (choice.outcome === 'accepted') {
+            closeInstallModal();
+            toast('JARVIS app installed!');
+          }
+          _deferredInstallPrompt = null;
+        });
+      }
+    }
+
     function installPWA() {
+      openInstallModal();
+    }
+
+    function old_installPWA() {
       if (_deferredInstallPrompt) {
         _deferredInstallPrompt.prompt();
         _deferredInstallPrompt.userChoice.then((choice) => {
