@@ -10,7 +10,11 @@ ENV/
 
 # Project Specific
 config/api_keys.json
-memory/
+config/certs/
+memory/*
+!memory/__init__.py
+!memory/config_manager.py
+!memory/memory_manager.py
 .antigravity_bridge/
 *.log
 dashboard/certs/
