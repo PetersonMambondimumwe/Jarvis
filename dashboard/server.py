@@ -492,6 +492,19 @@ class DashboardServer:
         self._phone_audio_ws_clients -= dead
         self._phone_speaker_ws_clients -= dead
 
+    async def broadcast_audio_control(self, action: str) -> None:
+        """Send audio control messages (e.g. clear/stop) to connected speaker websockets."""
+        msg = json.dumps({"type": "clear_audio" if action == "clear" else action})
+        dead: set[WebSocket] = set()
+        audio_clients = self._phone_audio_ws_clients | self._phone_speaker_ws_clients
+        for ws in list(audio_clients):
+            try:
+                await asyncio.wait_for(ws.send_text(msg), timeout=0.2)
+            except Exception:
+                dead.add(ws)
+        self._phone_audio_ws_clients -= dead
+        self._phone_speaker_ws_clients -= dead
+
     def clear_phone_audio_queue(self) -> int:
         """Drop stale microphone frames after a phone reconnects or disconnects."""
         dropped = 0

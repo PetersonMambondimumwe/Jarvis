@@ -1219,15 +1219,25 @@ class JarvisLive:
                         else:
                             if self._turn_done_event and self._turn_done_event.is_set():
                                 self._turn_done_event.clear()
-                            # Split into ~50 ms chunks so interrupt() stops audio within 50 ms
-                            # (24000 Hz × 2 bytes/sample × 0.05 s = 2400 bytes per slice)
+                            # Split into ~100 ms chunks to minimize network packet overhead
+                            # (24000 Hz × 2 bytes/sample × 0.10 s = 4800 bytes per slice)
                             _audio_data = response.data
-                            _SLICE = 2400
+                            _SLICE = 4800
                             for _i in range(0, len(_audio_data), _SLICE):
                                 self.audio_in_queue.put_nowait(_audio_data[_i : _i + _SLICE])
 
                     if response.server_content:
                         sc = response.server_content
+
+                        if getattr(sc, "interrupted", False):
+                            self._interrupted = True
+                            while not self.audio_in_queue.empty():
+                                try:
+                                    self.audio_in_queue.get_nowait()
+                                except asyncio.QueueEmpty:
+                                    break
+                            if self._dashboard:
+                                asyncio.create_task(self._dashboard.broadcast_audio_control("clear"))
 
                         if sc.output_transcription and sc.output_transcription.text:
                             txt = _clean_transcript(sc.output_transcription.text)
@@ -1368,9 +1378,10 @@ class JarvisLive:
                     except (RuntimeError, asyncio.CancelledError):
                         break   # executor shutting down — exit cleanly
                 else:
-                    # In headless server mode, pace audio broadcast in real time (48000 bytes/s)
+                    # In headless server mode, pace audio broadcast slightly ahead of real time (70% of duration)
+                    # so the client's jitter buffer stays comfortably filled and never starves on network jitter.
                     dur = len(chunk) / (RECEIVE_SAMPLE_RATE * 2)
-                    await asyncio.sleep(dur)
+                    await asyncio.sleep(dur * 0.70)
         except Exception as e:
             print(f"[JARVIS] ❌ Play: {e}")
             raise

@@ -941,8 +941,17 @@
 
     const VOICE_SEND_SAMPLES = 1600; // 100 ms at 16 kHz keeps mobile WebSocket traffic steady.
     const MAX_VOICE_WS_BUFFER = 256 * 1024;
-    const PLAYBACK_JITTER_SECONDS = 0.12;
-    const MAX_PLAYBACK_AHEAD_SECONDS = 1.5;
+    const JITTER_BUFFER_SECONDS = 0.08;
+    const MAX_PLAYBACK_AHEAD_SECONDS = 2.0;
+    let _activeAudioSources = [];
+
+    function _stopAllAudio() {
+      _playTime = 0;
+      for (const s of _activeAudioSources) {
+        try { s.stop(); s.disconnect(); } catch (_) {}
+      }
+      _activeAudioSources = [];
+    }
 
     function _sendVoiceBuffer(ws, buffer) {
       if (ws.readyState !== WebSocket.OPEN) return false;
@@ -1030,6 +1039,15 @@
     }
 
     async function _playJarvisAudio(data) {
+      if (typeof data === 'string') {
+        try {
+          const msg = JSON.parse(data);
+          if (msg.type === 'clear_audio') {
+            _stopAllAudio();
+          }
+        } catch (_) {}
+        return;
+      }
       if (!_ttsEnabled) return;
       let arrayBuf = data;
       if (data instanceof Blob) {
@@ -1042,6 +1060,7 @@
         if (ctx.state === 'suspended') await ctx.resume();
 
         const byteLen = arrayBuf.byteLength - (arrayBuf.byteLength % 2);
+        if (byteLen <= 0) return;
         const pcm16 = new Int16Array(arrayBuf, 0, byteLen / 2);
         const f32 = new Float32Array(pcm16.length);
         for (let i = 0; i < pcm16.length; i++) {
@@ -1056,12 +1075,17 @@
         src.connect(ctx.destination);
 
         const now = ctx.currentTime;
-        const minStart = now + PLAYBACK_JITTER_SECONDS;
-        if (_playTime < minStart || _playTime - now > MAX_PLAYBACK_AHEAD_SECONDS) {
-          _playTime = minStart;
+        if (_playTime <= now || _playTime - now > MAX_PLAYBACK_AHEAD_SECONDS) {
+          _playTime = now + JITTER_BUFFER_SECONDS;
         }
         src.start(_playTime);
         _playTime += buf.duration;
+
+        _activeAudioSources.push(src);
+        src.onended = () => {
+          const idx = _activeAudioSources.indexOf(src);
+          if (idx !== -1) _activeAudioSources.splice(idx, 1);
+        };
       } catch (err) {
         console.error('Audio playback error:', err);
       }
@@ -1077,7 +1101,7 @@
           if (ws.readyState < WebSocket.CLOSING) ws.close();
         } catch (_) {}
       }
-      _playTime = 0;
+      _stopAllAudio();
     }
 
     function _connectSpeaker() {
@@ -1125,6 +1149,7 @@
       if (ctx.state === 'suspended') {
         try { await ctx.resume(); } catch (_) {}
       }
+      _stopAllAudio();
       _connectSpeaker();
 
       if (!navigator.mediaDevices?.getUserMedia) {
