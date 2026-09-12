@@ -3,10 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: jarvis-server
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     volumes:
       # Persist configuration and memory data on your host server
       - ./config:/app/config
