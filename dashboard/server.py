@@ -11,6 +11,7 @@ Install deps:  pip install fastapi "uvicorn[standard]" cryptography
 import asyncio
 import base64
 import hashlib
+import json
 import os
 import re
 import secrets
@@ -385,9 +386,36 @@ class DashboardServer:
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
         self._phone_audio_ws_clients: set[WebSocket] = set()
         self._uploads_dir                 = UPLOADS_DIR
+        self._load_sessions()
         self._login_html                  = _read("login.html")
         self._app_html                    = _read("app.html")
         self.app                          = self._build_app()
+
+    def _load_sessions(self) -> None:
+        try:
+            sess_file = BASE_DIR / "config" / "sessions.json"
+            if sess_file.exists():
+                data = json.loads(sess_file.read_text(encoding="utf-8"))
+                self._tokens = set(data.get("tokens", []))
+                self._token_keys = data.get("token_keys", {})
+                self._device_sessions = data.get("device_sessions", {})
+                for tok, key in self._token_keys.items():
+                    self._aes_key(key)
+        except Exception:
+            pass
+
+    def _save_sessions(self) -> None:
+        try:
+            sess_file = BASE_DIR / "config" / "sessions.json"
+            sess_file.parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "tokens": list(self._tokens),
+                "token_keys": self._token_keys,
+                "device_sessions": self._device_sessions,
+            }
+            sess_file.write_text(json.dumps(data), encoding="utf-8")
+        except Exception:
+            pass
 
     # ── one-time key management ───────────────────────────────────────────
 
@@ -472,7 +500,17 @@ class DashboardServer:
             if client_host in ("127.0.0.1", "::1", "localhost"):
                 return True
             tok = req.headers.get("authorization", "").removeprefix("Bearer ").strip()
-            return bool(tok) and tok in self._tokens
+            if not tok:
+                return False
+            master_pin = os.environ.get("JARVIS_PIN", "JARVIS").upper()
+            if tok.upper() == master_pin:
+                if tok not in self._tokens:
+                    self._tokens.add(tok)
+                    self._token_keys[tok] = master_pin
+                    self._aes_key(master_pin)
+                    self._save_sessions()
+                return True
+            return tok in self._tokens
 
         # serve CryptoJS from local cache, fallback to CDN redirect
         @app.get("/static/crypto.js")
@@ -565,6 +603,7 @@ class DashboardServer:
                 self._tokens.add(tok)
                 self._token_keys[tok] = entered
                 self._aes_key(entered)
+                self._save_sessions()
                 if self._connect_callback:
                     try: self._connect_callback()
                     except Exception: pass
@@ -603,6 +642,7 @@ class DashboardServer:
             self._token_keys[tok] = key
             self._aes_key(key)
             self._device_sessions[dev_tok] = {"session_key": key}
+            self._save_sessions()
 
             if self._connect_callback:
                 try: self._connect_callback()
@@ -643,6 +683,7 @@ class DashboardServer:
             self._tokens.add(tok)
             self._token_keys[tok] = session_key
             self._aes_key(session_key)
+            self._save_sessions()
             if self._connect_callback:
                 self._connect_callback()
             asyncio.create_task(self.broadcast(
@@ -657,6 +698,7 @@ class DashboardServer:
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
             count = len(self._device_sessions)
             self._device_sessions.clear()
+            self._save_sessions()
             return JSONResponse({"ok": True, "revoked": count})
 
         @app.post("/api/command")
@@ -691,6 +733,13 @@ class DashboardServer:
         @app.websocket("/ws/phone-audio")
         async def phone_audio_ws(websocket: WebSocket, token: str = ""):
             tok = token.strip()
+            master_pin = os.environ.get("JARVIS_PIN", "JARVIS").upper()
+            if tok and tok.upper() == master_pin:
+                if tok not in self._tokens:
+                    self._tokens.add(tok)
+                    self._token_keys[tok] = master_pin
+                    self._aes_key(master_pin)
+                    self._save_sessions()
             if not tok or tok not in self._tokens:
                 await websocket.close(code=4001)
                 return
@@ -796,6 +845,13 @@ class DashboardServer:
         async def download_file(filename: str, token: str = ""):
             # Auth via query param — browser <a download> can't send custom headers
             tok = token.strip()
+            master_pin = os.environ.get("JARVIS_PIN", "JARVIS").upper()
+            if tok and tok.upper() == master_pin:
+                if tok not in self._tokens:
+                    self._tokens.add(tok)
+                    self._token_keys[tok] = master_pin
+                    self._aes_key(master_pin)
+                    self._save_sessions()
             if not tok or tok not in self._tokens:
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
             safe = re.sub(r'[/\\]', '', filename)
@@ -807,6 +863,13 @@ class DashboardServer:
         @app.websocket("/ws")
         async def ws_ep(websocket: WebSocket, token: str = ""):
             tok = token.strip()
+            master_pin = os.environ.get("JARVIS_PIN", "JARVIS").upper()
+            if tok and tok.upper() == master_pin:
+                if tok not in self._tokens:
+                    self._tokens.add(tok)
+                    self._token_keys[tok] = master_pin
+                    self._aes_key(master_pin)
+                    self._save_sessions()
             if not tok or tok not in self._tokens:
                 await websocket.close(code=4001)
                 return
