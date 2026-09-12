@@ -506,17 +506,39 @@ class DashboardServer:
 
         @app.get("/login", response_class=HTMLResponse)
         async def login_page():
-            return HTMLResponse(self._login_html)
+            try:
+                content = (STATIC_DIR / "login.html").read_text(encoding="utf-8")
+            except Exception:
+                content = self._login_html
+            return HTMLResponse(
+                content,
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                }
+            )
 
         @app.get("/", response_class=HTMLResponse)
         async def index():
             # Auth is handled client-side via sessionStorage bearer token.
             # Server-side header auth can't work here because browser navigations
             # don't send custom headers (location.href doesn't carry Authorization).
-            html = (self._app_html
+            try:
+                content = (STATIC_DIR / "app.html").read_text(encoding="utf-8")
+            except Exception:
+                content = self._app_html
+            html = (content
                     .replace("__IP__", self._ip)
                     .replace("__PORT__", str(PORT)))
-            return HTMLResponse(html)
+            return HTMLResponse(
+                html,
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                }
+            )
 
         @app.get("/api/health")
         async def health():
