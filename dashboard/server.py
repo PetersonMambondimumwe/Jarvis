@@ -22,7 +22,7 @@ from pathlib import Path
 _DEPS_OK = False
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-    from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+    from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
     import uvicorn
     _DEPS_OK = True
 except ImportError:
@@ -482,6 +482,27 @@ class DashboardServer:
                                     media_type="application/javascript")
             from fastapi.responses import RedirectResponse
             return RedirectResponse(_CRYPTOJS_CDN)
+
+        @app.get("/manifest.json")
+        async def serve_manifest():
+            mpath = STATIC_DIR / "manifest.json"
+            if mpath.exists():
+                return FileResponse(str(mpath), media_type="application/manifest+json")
+            return JSONResponse({"name": "JARVIS", "short_name": "JARVIS", "display": "standalone"})
+
+        @app.get("/sw.js")
+        async def serve_sw():
+            sw_path = STATIC_DIR / "sw.js"
+            if sw_path.exists():
+                return FileResponse(str(sw_path), media_type="application/javascript", headers={"Service-Worker-Allowed": "/"})
+            return Response("self.addEventListener('fetch',()=>{});", media_type="application/javascript")
+
+        @app.get("/static/{filepath:path}")
+        async def serve_static_files(filepath: str):
+            fpath = STATIC_DIR / filepath
+            if fpath.exists() and fpath.is_file():
+                return FileResponse(str(fpath))
+            return JSONResponse({"error": "Not found"}, status_code=404)
 
         @app.get("/login", response_class=HTMLResponse)
         async def login_page():

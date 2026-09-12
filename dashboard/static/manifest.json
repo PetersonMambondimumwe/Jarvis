@@ -1,0 +1,25 @@
+{
+  "name": "JARVIS AI Assistant",
+  "short_name": "JARVIS",
+  "description": "Mark XLVIII Autonomous AI Assistant with Gemini Live Voice",
+  "start_url": "/auto-login?key=JARVIS",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#07090f",
+  "theme_color": "#07090f",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
