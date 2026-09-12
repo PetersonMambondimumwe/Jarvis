@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>JARVIS Dashboard</title>
     <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#07090f">
@@ -15,6 +15,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
+      --app-height: 100vh;
       --bg:      #07090f;
       --surface: rgba(255,255,255,0.04);
       --border:  rgba(255,255,255,0.07);
@@ -25,30 +26,40 @@
       --green:   #22c55e;
       --gdim:    rgba(34,197,94,0.14);
     }
-    html, body {
-      height: 100%; background: var(--bg); color: var(--text);
+    html {
+      width: 100%;
+      height: 100%;
+      min-height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+    }
+    body {
+      width: 100%;
+      height: var(--app-height);
+      min-height: 0;
+      background: var(--bg);
+      color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      display: flex; flex-direction: column; overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
 
         /* ── MOBILE RESPONSIVENESS & SAFE AREAS ── */
-    html, body {
-      height: 100%;
-      height: 100dvh;
-      overflow: hidden;
+    body {
       touch-action: manipulation;
     }
 
-    header {
-      padding-top: max(12px, env(safe-area-inset-top));
-      padding-left: max(12px, env(safe-area-inset-left));
-      padding-right: max(12px, env(safe-area-inset-right));
+    @supports (height: 100svh) {
+      :root {
+        --app-height: 100svh;
+      }
     }
 
-    footer {
-      padding-bottom: max(12px, env(safe-area-inset-bottom));
-      padding-left: max(12px, env(safe-area-inset-left));
-      padding-right: max(12px, env(safe-area-inset-right));
+    @media (display-mode: standalone) {
+      #install-btn {
+        display: none !important;
+      }
     }
 
     /* ── INSTALL MODAL ── */
@@ -128,8 +139,7 @@
         border-radius: 14px;
       }
       footer {
-        padding: 8px 10px;
-        padding-bottom: max(10px, env(safe-area-inset-bottom));
+        padding: 8px max(10px, env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
         gap: 6px;
       }
       #inp {
@@ -151,8 +161,8 @@
 
     /* ── HEADER ── */
     header {
-      flex-shrink: 0; display: flex; align-items: center; gap: 10px;
-      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+      padding: max(12px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--border);
       background: rgba(7,9,15,0.95);
     }
     .logo { font-size: 15px; font-weight: 700; letter-spacing: 6px; }
@@ -177,7 +187,7 @@
     .url { font-size: 10px; font-family: monospace; color: var(--muted); padding: 4px 9px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
 
     /* ── FEED ── */
-    main { flex: 1; overflow-y: auto; padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 10px; }
+    main { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 10px; overscroll-behavior: contain; }
     main::-webkit-scrollbar { width: 3px; }
     main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
     .msg { max-width: 82%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.55; animation: pop 0.18s ease; }
@@ -211,8 +221,8 @@
     .fc-dl:hover { opacity: 0.8; }
 
     /* ── FOOTER ── */
-    footer { flex-shrink:0; padding:10px 14px; border-top:1px solid var(--border); background:rgba(7,9,15,0.95); display:flex; gap:8px; align-items:center; }
-    #inp { flex:1; padding:11px 14px; background:var(--surface); border:1.5px solid var(--border); border-radius:12px; color:var(--text); font-size:14px; outline:none; transition:border-color 0.15s; }
+    footer { flex:0 0 auto; padding:10px max(14px, env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px)); border-top:1px solid var(--border); background:rgba(7,9,15,0.95); display:flex; gap:8px; align-items:center; }
+    #inp { flex:1; min-width:0; padding:11px 14px; background:var(--surface); border:1.5px solid var(--border); border-radius:12px; color:var(--text); font-size:14px; outline:none; transition:border-color 0.15s; }
     #inp:focus { border-color: var(--accent); }
     #inp::placeholder { color: var(--muted); }
     .btn { padding:11px 15px; border:none; border-radius:12px; font-size:11px; font-weight:700; letter-spacing:1.5px; cursor:pointer; transition:opacity 0.15s,transform 0.1s; }
@@ -256,6 +266,61 @@
       pointer-events:none; white-space:nowrap;
     }
     #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+    @media (max-width: 640px) {
+      header {
+        padding: max(10px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 10px max(12px, env(safe-area-inset-left, 0px));
+        gap: 6px;
+      }
+      .logo {
+        font-size: 13px;
+        letter-spacing: 2px;
+      }
+      .pill {
+        padding: 5px 8px;
+        font-size: 9px;
+        letter-spacing: 1px;
+      }
+      #install-btn {
+        padding: 5px 9px;
+        font-size: 10px;
+        letter-spacing: 1px;
+      }
+      main {
+        padding: 12px 10px 6px;
+        gap: 8px;
+      }
+      footer {
+        width: 100%;
+        padding: 8px max(10px, env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
+        gap: 6px;
+      }
+      #inp {
+        font-size: 16px !important;
+        padding: 10px 12px;
+        border-radius: 10px;
+      }
+      .btn {
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-size: 11px;
+      }
+      #mic-btn,
+      .btn-attach {
+        padding: 10px 12px;
+        font-size: 16px;
+        border-radius: 10px;
+      }
+    }
+
+    @media (display-mode: standalone) {
+      #install-btn {
+        display: none !important;
+      }
+    }
+    .is-standalone #install-btn {
+      display: none !important;
+    }
   </style>
 </head>
 <body>
@@ -327,6 +392,51 @@
   </footer>
 
   <script>
+    function _isStandaloneDisplay() {
+      return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    }
+
+    function _syncInstallButton() {
+      document.documentElement.classList.toggle('is-standalone', _isStandaloneDisplay());
+      const btn = document.getElementById('install-btn');
+      if (btn && _isStandaloneDisplay()) {
+        btn.style.display = 'none';
+      }
+    }
+
+    function _setAppHeight() {
+      const h = Math.round(
+        (window.visualViewport && window.visualViewport.height) ||
+        window.innerHeight ||
+        document.documentElement.clientHeight
+      );
+      if (h > 0) {
+        document.documentElement.style.setProperty('--app-height', `${h}px`);
+      }
+    }
+
+    function _refreshViewportShell() {
+      _setAppHeight();
+      _syncInstallButton();
+    }
+
+    _refreshViewportShell();
+    window.addEventListener('resize', _refreshViewportShell, { passive: true });
+    window.addEventListener('orientationchange', () => setTimeout(_refreshViewportShell, 250), { passive: true });
+    window.addEventListener('pageshow', () => {
+      _refreshViewportShell();
+      setTimeout(_refreshViewportShell, 250);
+    });
+    document.addEventListener('DOMContentLoaded', _refreshViewportShell);
+    window.addEventListener('load', () => {
+      _refreshViewportShell();
+      setTimeout(_refreshViewportShell, 250);
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', _refreshViewportShell, { passive: true });
+      window.visualViewport.addEventListener('scroll', _refreshViewportShell, { passive: true });
+    }
+
     // -- Service Worker & PWA Install ------------------------------------------
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
@@ -336,6 +446,7 @@
 
     let _deferredInstallPrompt = null;
     window.addEventListener('beforeinstallprompt', (e) => {
+      if (_isStandaloneDisplay()) return;
       e.preventDefault();
       _deferredInstallPrompt = e;
       const btn = document.getElementById('install-btn');
@@ -571,6 +682,8 @@
     window.addEventListener('online', () => connectWS());
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
+        _refreshViewportShell();
+        setTimeout(_refreshViewportShell, 250);
         if (!_ws || _ws.readyState !== WebSocket.OPEN) {
           connectWS();
         }
