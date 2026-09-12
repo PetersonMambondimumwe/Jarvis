@@ -948,15 +948,41 @@
       micBtn.classList.remove('recording');
     }
 
-    // Float32 PCM → resample to 16 kHz + convert to Int16
+    const VOICE_SEND_SAMPLES = 1600; // 100 ms at 16 kHz keeps mobile WebSocket traffic steady.
+    const MAX_VOICE_WS_BUFFER = 256 * 1024;
+    const PLAYBACK_JITTER_SECONDS = 0.12;
+    const MAX_PLAYBACK_AHEAD_SECONDS = 1.5;
+
+    function _sendVoiceBuffer(ws, buffer) {
+      if (ws.readyState !== WebSocket.OPEN) return false;
+      if (ws.bufferedAmount > MAX_VOICE_WS_BUFFER) return false;
+      ws.send(buffer);
+      return true;
+    }
+
+    function _joinPcmChunks(chunks, totalLength) {
+      const out = new Int16Array(totalLength);
+      let off = 0;
+      for (const c of chunks) {
+        out.set(c, off);
+        off += c.length;
+      }
+      return out.buffer;
+    }
+
     function _f32toPcm16(f32, srcRate) {
       let s = f32;
       if (srcRate !== 16000) {
         const ratio = srcRate / 16000;
         const len   = Math.round(f32.length / ratio);
         s = new Float32Array(len);
-        for (let i = 0; i < len; i++)
-          s[i] = f32[Math.min(Math.round(i * ratio), f32.length - 1)];
+        for (let i = 0; i < len; i++) {
+          const pos  = i * ratio;
+          const i0   = Math.min(Math.floor(pos), f32.length - 1);
+          const i1   = Math.min(i0 + 1, f32.length - 1);
+          const frac = pos - i0;
+          s[i] = f32[i0] + (f32[i1] - f32[i0]) * frac;
+        }
       }
       const out = new Int16Array(s.length);
       for (let i = 0; i < s.length; i++)
@@ -1030,7 +1056,13 @@
       let stream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 16000,
+          },
         });
       } catch (e) {
         sys(e.name === 'NotAllowedError'
@@ -1050,24 +1082,53 @@
         const src  = ctx.createMediaStreamSource(stream);
 
         // AudioWorklet (modern) — runs in dedicated audio thread
-        const wCode = `class J extends AudioWorkletProcessor{process(i){const c=i[0]?.[0];if(c)this.port.postMessage(c.slice());return true;}}registerProcessor('j',J);`;
+        const wCode = `
+          class J extends AudioWorkletProcessor {
+            constructor() {
+              super();
+              this.parts = [];
+              this.length = 0;
+              this.target = ${VOICE_SEND_SAMPLES};
+            }
+            process(inputs) {
+              const c = inputs[0] && inputs[0][0];
+              if (!c) return true;
+              const ratio = sampleRate / 16000;
+              const len = Math.max(1, Math.round(c.length / ratio));
+              const pcm = new Int16Array(len);
+              for (let i = 0; i < len; i++) {
+                const pos = i * ratio;
+                const i0 = Math.min(Math.floor(pos), c.length - 1);
+                const i1 = Math.min(i0 + 1, c.length - 1);
+                const frac = pos - i0;
+                const v = Math.max(-1, Math.min(1, c[i0] + (c[i1] - c[i0]) * frac));
+                pcm[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32768)));
+              }
+              this.parts.push(pcm);
+              this.length += pcm.length;
+              if (this.length >= this.target) {
+                const out = new Int16Array(this.length);
+                let off = 0;
+                for (const part of this.parts) {
+                  out.set(part, off);
+                  off += part.length;
+                }
+                this.port.postMessage(out.buffer, [out.buffer]);
+                this.parts = [];
+                this.length = 0;
+              }
+              return true;
+            }
+          }
+          registerProcessor('j', J);
+        `;
         try {
           const burl = URL.createObjectURL(new Blob([wCode], { type: 'application/javascript' }));
           await ctx.audioWorklet.addModule(burl);
           URL.revokeObjectURL(burl);
           const nd = new AudioWorkletNode(ctx, 'j');
-          // Buffer to 1024 samples (64 ms at 16 kHz) before sending —
-          // matches PC mic chunk size, prevents queue flooding on the server.
-          let _pbuf = [], _plen = 0;
           nd.port.onmessage = e => {
-            const chunk = new Int16Array(_f32toPcm16(e.data, rate));
-            _pbuf.push(chunk); _plen += chunk.length;
-            if (_plen >= 1024) {
-              const out = new Int16Array(_plen); let off = 0;
-              for (const c of _pbuf) { out.set(c, off); off += c.length; }
-              if (ws.readyState === 1) ws.send(out.buffer);
-              _pbuf = []; _plen = 0;
-            }
+            _sendVoiceBuffer(ws, e.data);
           };
           src.connect(nd);
           nd.connect(_ensureSilentSink(ctx));
@@ -1075,8 +1136,16 @@
         } catch (_) {
           // ScriptProcessor fallback
           const sp = ctx.createScriptProcessor(4096, 1, 1);
+          let _pbuf = [], _plen = 0;
           sp.onaudioprocess = e => {
-            if (ws.readyState === 1) ws.send(_f32toPcm16(e.inputBuffer.getChannelData(0), rate));
+            const chunk = new Int16Array(_f32toPcm16(e.inputBuffer.getChannelData(0), rate));
+            _pbuf.push(chunk);
+            _plen += chunk.length;
+            if (_plen >= VOICE_SEND_SAMPLES) {
+              _sendVoiceBuffer(ws, _joinPcmChunks(_pbuf, _plen));
+              _pbuf = [];
+              _plen = 0;
+            }
           };
           src.connect(sp);
           sp.connect(_ensureSilentSink(ctx));
@@ -1117,7 +1186,10 @@
             src.connect(ctx.destination);
 
             const now = ctx.currentTime;
-            if (_playTime < now) _playTime = now;
+            const minStart = now + PLAYBACK_JITTER_SECONDS;
+            if (_playTime < minStart || _playTime - now > MAX_PLAYBACK_AHEAD_SECONDS) {
+              _playTime = minStart;
+            }
             src.start(_playTime);
             _playTime += buf.duration;
           } catch (err) {

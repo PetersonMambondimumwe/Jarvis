@@ -1454,8 +1454,8 @@ class JarvisLive:
                 speaking = self._is_speaking
             if not speaking and not self.ui.muted:
                 try:
-                    self.out_queue.put_nowait(chunk)
-                except asyncio.QueueFull:
+                    await asyncio.wait_for(self.out_queue.put(chunk), timeout=0.25)
+                except (asyncio.QueueFull, asyncio.TimeoutError):
                     pass
 
     def _on_phone_connected(self) -> None:

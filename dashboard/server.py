@@ -383,7 +383,7 @@ class DashboardServer:
         self._connect_callback            = None
         self._pending_keys: dict[str, float] = {}
         self._device_sessions: dict[str, dict] = {}  # device_token → {session_key}
-        self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
+        self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=500)
         self._phone_audio_ws_clients: set[WebSocket] = set()
         self._uploads_dir                 = UPLOADS_DIR
         self._load_sessions()
@@ -488,6 +488,16 @@ class DashboardServer:
             except Exception:
                 dead.add(ws)
         self._phone_audio_ws_clients -= dead
+
+    def clear_phone_audio_queue(self) -> int:
+        """Drop stale microphone frames after a phone reconnects or disconnects."""
+        dropped = 0
+        while True:
+            try:
+                self._phone_audio_queue.get_nowait()
+                dropped += 1
+            except asyncio.QueueEmpty:
+                return dropped
 
 
     # ── FastAPI app ───────────────────────────────────────────────────────
@@ -744,6 +754,7 @@ class DashboardServer:
                 await websocket.close(code=4001)
                 return
             await websocket.accept()
+            self.clear_phone_audio_queue()
             self._phone_audio_ws_clients.add(websocket)
             asyncio.create_task(self.broadcast(
                 {"type": "sys", "text": "Phone microphone live."}
@@ -751,16 +762,23 @@ class DashboardServer:
             try:
                 while True:
                     data = await websocket.receive_bytes()
+                    frame = {"data": data, "mime_type": "audio/pcm"}
                     try:
-                        self._phone_audio_queue.put_nowait(
-                            {"data": data, "mime_type": "audio/pcm"}
-                        )
-                    except asyncio.QueueFull:
-                        pass  # drop frame rather than block
+                        await asyncio.wait_for(self._phone_audio_queue.put(frame), timeout=0.25)
+                    except asyncio.TimeoutError:
+                        try:
+                            self._phone_audio_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            pass
+                        try:
+                            self._phone_audio_queue.put_nowait(frame)
+                        except asyncio.QueueFull:
+                            pass
             except WebSocketDisconnect:
                 pass
             finally:
                 self._phone_audio_ws_clients.discard(websocket)
+                self.clear_phone_audio_queue()
                 asyncio.create_task(self.broadcast(
                     {"type": "sys", "text": "Phone microphone stopped."}
                 ))
