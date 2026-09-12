@@ -8,7 +8,7 @@ services:
       - "8000"
     volumes:
       # Persist configuration and memory data on your host server
-      - ./config:/app/config
+      - /root/jarvis/config/api_keys.json:/app/config/api_keys.json:ro
       - ./memory:/app/memory
       - ./uploads:/app/uploads
       - ./.antigravity_bridge:/app/.antigravity_bridge
