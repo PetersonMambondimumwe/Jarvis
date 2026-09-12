@@ -637,6 +637,7 @@
         _reconnectAttempts = 0;
         clearTimeout(_reconnectTimer);
         setStatus('starting');
+        _connectSpeaker();
         sys('Connected to JARVIS.');
         toast('Connected to dashboard');
       };
@@ -665,10 +666,7 @@
       _ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
         if (m.type === 'log') {
-          const added = append(m.speaker, m.text);
-          if (m.speaker === 'jarvis' && added) {
-            _speakTTS(m.text);
-          }
+          append(m.speaker, m.text);
         }
         if (m.type === 'status')        setStatus(m.state);
         if (m.type === 'wake')          sys('Wake word detected — connecting…');
@@ -687,6 +685,7 @@
         if (!_ws || _ws.readyState !== WebSocket.OPEN) {
           connectWS();
         }
+        _connectSpeaker();
       }
     });
     let _ttsEnabled = true;
@@ -700,31 +699,17 @@
         btn.style.color = 'var(--green)';
         txt.textContent = 'VOICE ON';
         _ensureAudioCtx();
+        _connectSpeaker();
         toast('Voice output active');
       } else {
         btn.style.background = 'var(--surface)';
         btn.style.borderColor = 'var(--border)';
         btn.style.color = 'var(--muted)';
         txt.textContent = 'VOICE MUTED';
+        _closeSpeaker();
         if (window.speechSynthesis) window.speechSynthesis.cancel();
         toast('Voice output muted');
       }
-    }
-
-    function _speakTTS(rawText) {
-      if (!_ttsEnabled || !window.speechSynthesis) return;
-      try {
-        const clean = rawText.replace(/^Jarvis:\s*/i, '').replace(/<[^>]+>/g, '').trim();
-        if (!clean) return;
-        window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(clean);
-        u.rate = 1.0;
-        u.pitch = 1.0;
-        const voices = window.speechSynthesis.getVoices();
-        const enVoice = voices.find(v => (v.lang.startsWith('en')) && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Daniel') || v.name.includes('Oliver') || v.name.includes('Male')));
-        if (enVoice) u.voice = enVoice;
-        window.speechSynthesis.speak(u);
-      } catch (_) {}
     }
 
     let _lastLog = { speaker: null, text: null, ts: 0 };
@@ -907,6 +892,8 @@
       if (!txt) return;
       inp.value = '';
       append('user', txt);
+      _ensureAudioCtx();
+      _connectSpeaker();
       const enc  = _encrypt(txt);
       const body = enc ? { enc } : { text: txt };
       _authFetch('/api/command', {
@@ -937,10 +924,14 @@
     // ── Real-time Voice — PCM16 WebSocket → Gemini Live ──────────────────────
     const micBtn  = document.getElementById('mic-btn');
     let _voiceWs  = null;
+    let _speakerWs = null;
+    let _speakerReconnectTimer = null;
+    let _speakerReconnectAttempts = 0;
     let _audioCtx = null;
     let _micStm   = null;
     let _audioNd  = null;
     let _audioSink = null;
+    let _playTime = 0;
 
     function _micIdle() {
       micBtn.innerHTML = '🎤';
@@ -1037,6 +1028,92 @@
       }
       return _audioSink;
     }
+
+    async function _playJarvisAudio(data) {
+      if (!_ttsEnabled) return;
+      let arrayBuf = data;
+      if (data instanceof Blob) {
+        arrayBuf = await data.arrayBuffer();
+      }
+      if (!(arrayBuf instanceof ArrayBuffer) || arrayBuf.byteLength <= 0) return;
+      try {
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+        const ctx = _ensureAudioCtx();
+        if (ctx.state === 'suspended') await ctx.resume();
+
+        const byteLen = arrayBuf.byteLength - (arrayBuf.byteLength % 2);
+        const pcm16 = new Int16Array(arrayBuf, 0, byteLen / 2);
+        const f32 = new Float32Array(pcm16.length);
+        for (let i = 0; i < pcm16.length; i++) {
+          f32[i] = pcm16[i] / 32768.0;
+        }
+
+        const buf = ctx.createBuffer(1, f32.length, 24000);
+        buf.getChannelData(0).set(f32);
+
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(ctx.destination);
+
+        const now = ctx.currentTime;
+        const minStart = now + PLAYBACK_JITTER_SECONDS;
+        if (_playTime < minStart || _playTime - now > MAX_PLAYBACK_AHEAD_SECONDS) {
+          _playTime = minStart;
+        }
+        src.start(_playTime);
+        _playTime += buf.duration;
+      } catch (err) {
+        console.error('Audio playback error:', err);
+      }
+    }
+
+    function _closeSpeaker() {
+      clearTimeout(_speakerReconnectTimer);
+      _speakerReconnectTimer = null;
+      if (_speakerWs) {
+        const ws = _speakerWs;
+        _speakerWs = null;
+        try {
+          if (ws.readyState < WebSocket.CLOSING) ws.close();
+        } catch (_) {}
+      }
+      _playTime = 0;
+    }
+
+    function _connectSpeaker() {
+      if (!_ttsEnabled || !_authToken) return;
+      if (_speakerWs && (_speakerWs.readyState === WebSocket.OPEN || _speakerWs.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+      clearTimeout(_speakerReconnectTimer);
+      const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(
+        `${wsProto}://${location.host}/ws/phone-speaker?token=${encodeURIComponent(_authToken)}`
+      );
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => {
+        _speakerReconnectAttempts = 0;
+      };
+      ws.onmessage = (e) => {
+        _playJarvisAudio(e.data);
+      };
+      ws.onclose = async (e) => {
+        if (_speakerWs === ws) _speakerWs = null;
+        if (!_ttsEnabled) return;
+        if (e.code === 4001) {
+          const renewed = await _renewAuth();
+          if (!renewed) return;
+        }
+        const delay = Math.min(1000 * Math.pow(1.4, _speakerReconnectAttempts), 6000);
+        _speakerReconnectAttempts++;
+        _speakerReconnectTimer = setTimeout(_connectSpeaker, delay);
+      };
+      ws.onerror = () => {
+        try { ws.close(); } catch (_) {}
+      };
+      _speakerWs = ws;
+    }
+
     document.addEventListener('click', () => { _ensureAudioCtx(); }, { once: false });
     document.addEventListener('touchstart', () => { _ensureAudioCtx(); }, { once: false });
 
@@ -1048,6 +1125,7 @@
       if (ctx.state === 'suspended') {
         try { await ctx.resume(); } catch (_) {}
       }
+      _connectSpeaker();
 
       if (!navigator.mediaDevices?.getUserMedia) {
         _showVoiceSetup();
@@ -1073,7 +1151,7 @@
 
       const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(
-        `${wsProto}://${location.host}/ws/phone-audio?token=${encodeURIComponent(_authToken)}`
+        `${wsProto}://${location.host}/ws/phone-audio?token=${encodeURIComponent(_authToken)}&playback=0`
       );
       ws.binaryType = 'arraybuffer';
 
@@ -1160,42 +1238,8 @@
       };
 
       // Playback audio returned from Jarvis (24 kHz PCM from Gemini Live)
-      let _playTime = 0;
       ws.onmessage = async (e) => {
-        let arrayBuf = e.data;
-        if (e.data instanceof Blob) {
-          arrayBuf = await e.data.arrayBuffer();
-        }
-        if (arrayBuf instanceof ArrayBuffer && arrayBuf.byteLength > 0) {
-          try {
-            if (window.speechSynthesis) window.speechSynthesis.cancel();
-            if (ctx.state === 'suspended') await ctx.resume();
-
-            const byteLen = arrayBuf.byteLength - (arrayBuf.byteLength % 2);
-            const pcm16 = new Int16Array(arrayBuf, 0, byteLen / 2);
-            const f32 = new Float32Array(pcm16.length);
-            for (let i = 0; i < pcm16.length; i++) {
-              f32[i] = pcm16[i] / 32768.0;
-            }
-
-            const buf = ctx.createBuffer(1, f32.length, 24000);
-            buf.getChannelData(0).set(f32);
-
-            const src = ctx.createBufferSource();
-            src.buffer = buf;
-            src.connect(ctx.destination);
-
-            const now = ctx.currentTime;
-            const minStart = now + PLAYBACK_JITTER_SECONDS;
-            if (_playTime < minStart || _playTime - now > MAX_PLAYBACK_AHEAD_SECONDS) {
-              _playTime = minStart;
-            }
-            src.start(_playTime);
-            _playTime += buf.duration;
-          } catch (err) {
-            console.error('Audio playback error:', err);
-          }
-        }
+        _playJarvisAudio(e.data);
       };
 
       ws.onclose = () => { _stopVoice(); };

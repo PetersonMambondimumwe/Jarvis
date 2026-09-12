@@ -385,6 +385,7 @@ class DashboardServer:
         self._device_sessions: dict[str, dict] = {}  # device_token → {session_key}
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=500)
         self._phone_audio_ws_clients: set[WebSocket] = set()
+        self._phone_speaker_ws_clients: set[WebSocket] = set()
         self._uploads_dir                 = UPLOADS_DIR
         self._load_sessions()
         self._login_html                  = _read("login.html")
@@ -482,12 +483,14 @@ class DashboardServer:
     async def broadcast_audio(self, pcm_chunk: bytes) -> None:
         """Send raw PCM audio chunks to connected phone audio websockets."""
         dead: set[WebSocket] = set()
-        for ws in list(self._phone_audio_ws_clients):
+        audio_clients = self._phone_audio_ws_clients | self._phone_speaker_ws_clients
+        for ws in list(audio_clients):
             try:
-                await ws.send_bytes(pcm_chunk)
+                await asyncio.wait_for(ws.send_bytes(pcm_chunk), timeout=0.2)
             except Exception:
                 dead.add(ws)
         self._phone_audio_ws_clients -= dead
+        self._phone_speaker_ws_clients -= dead
 
     def clear_phone_audio_queue(self) -> int:
         """Drop stale microphone frames after a phone reconnects or disconnects."""
@@ -594,7 +597,7 @@ class DashboardServer:
                 "ok": True,
                 "status": self._current_status.get("state", "starting"),
                 "clients": len(self._clients),
-                "voice_clients": len(self._phone_audio_ws_clients),
+                "voice_clients": len(self._phone_audio_ws_clients) + len(self._phone_speaker_ws_clients),
                 "history": len(self._history),
             })
 
@@ -740,9 +743,7 @@ class DashboardServer:
 
         # ── Phone mic real-time audio → Gemini Live ──────────────────────────
 
-        @app.websocket("/ws/phone-audio")
-        async def phone_audio_ws(websocket: WebSocket, token: str = ""):
-            tok = token.strip()
+        def _authorize_ws_token(tok: str) -> bool:
             master_pin = os.environ.get("JARVIS_PIN", "JARVIS").upper()
             if tok and tok.upper() == master_pin:
                 if tok not in self._tokens:
@@ -750,12 +751,35 @@ class DashboardServer:
                     self._token_keys[tok] = master_pin
                     self._aes_key(master_pin)
                     self._save_sessions()
-            if not tok or tok not in self._tokens:
+            return bool(tok and tok in self._tokens)
+
+        @app.websocket("/ws/phone-speaker")
+        async def phone_speaker_ws(websocket: WebSocket, token: str = ""):
+            tok = token.strip()
+            if not _authorize_ws_token(tok):
+                await websocket.close(code=4001)
+                return
+            await websocket.accept()
+            self._phone_speaker_ws_clients.add(websocket)
+            try:
+                while True:
+                    await websocket.receive_text()
+            except WebSocketDisconnect:
+                pass
+            finally:
+                self._phone_speaker_ws_clients.discard(websocket)
+
+        @app.websocket("/ws/phone-audio")
+        async def phone_audio_ws(websocket: WebSocket, token: str = "", playback: str = "1"):
+            tok = token.strip()
+            if not _authorize_ws_token(tok):
                 await websocket.close(code=4001)
                 return
             await websocket.accept()
             self.clear_phone_audio_queue()
-            self._phone_audio_ws_clients.add(websocket)
+            sends_playback = playback != "0"
+            if sends_playback:
+                self._phone_audio_ws_clients.add(websocket)
             asyncio.create_task(self.broadcast(
                 {"type": "sys", "text": "Phone microphone live."}
             ))
@@ -777,7 +801,8 @@ class DashboardServer:
             except WebSocketDisconnect:
                 pass
             finally:
-                self._phone_audio_ws_clients.discard(websocket)
+                if sends_playback:
+                    self._phone_audio_ws_clients.discard(websocket)
                 self.clear_phone_audio_queue()
                 asyncio.create_task(self.broadcast(
                     {"type": "sys", "text": "Phone microphone stopped."}
