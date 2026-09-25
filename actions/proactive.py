@@ -3,8 +3,11 @@ ProactiveEngine — context-aware background prompting.
 Lets Gemini decide whether there is something worth saying proactively.
 No hardcoded rules: we pass time + memory as context and Gemini chooses.
 """
+import os
 import time
 from datetime import datetime
+
+DEFAULT_PROACTIVE_INTERVAL = int(os.environ.get("JARVIS_PROACTIVE_INTERVAL_SECS", "3600"))  # 1 hour (3600s)
 
 
 class ProactiveEngine:
@@ -12,15 +15,15 @@ class ProactiveEngine:
     Tracks silence duration and decides when to hand context to Gemini for a
     proactive check-in. Gemini reads the context and decides whether to speak.
 
-    Defaults (all overridable):
-      min_silence_secs   — user must be silent this long before any check (900 = 15 min)
-      check_cooldown     — minimum gap between two proactive triggers         (600 = 10 min)
+    Defaults:
+      min_silence_secs   — user must be silent this long before any check (3600 = 1 hour)
+      check_cooldown     — minimum gap between two proactive triggers     (3600 = 1 hour)
     """
 
     def __init__(
         self,
-        min_silence_secs: int = 900,
-        check_cooldown:   int = 600,
+        min_silence_secs: int = DEFAULT_PROACTIVE_INTERVAL,
+        check_cooldown:   int = DEFAULT_PROACTIVE_INTERVAL,
     ):
         self.min_silence_secs = min_silence_secs
         self.check_cooldown   = check_cooldown

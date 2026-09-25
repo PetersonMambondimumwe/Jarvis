@@ -27,7 +27,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🧠 Persistent Memory | Deeply remembers projects, preferences, and personal context across sessions |
 | ⌨️ Hybrid Input | Seamlessly switch between keyboard typing and voice commands |
 | 🌅 Morning Briefing | On first boot: greets you, reads the time, fetches live news headlines, and checks weather |
-| 🔔 Proactive Check-ins | After 15 minutes of silence JARVIS checks context and offers something genuinely useful — no hardcoded rules, Gemini decides |
+| 🔔 Proactive Check-ins | Every hour of silence JARVIS checks context and offers something genuinely useful — no hardcoded rules, Gemini decides |
 | 📊 Hardware Monitoring | Continuous CPU, RAM, GPU and temperature telemetry with localized voice alerts when thresholds are breached |
 | 🌤️ Weather Report | Live weather data for your city, personalized from memory |
 | 🗺️ Dynamic Content Panel | Scrollable display layer beneath the HUD that renders web results, news, and search data with timestamps |
