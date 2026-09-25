@@ -236,6 +236,25 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "get_current_time",
+        "description": (
+            "Returns the current live date, time, day of the week, and timezone. "
+            "Use this whenever the user asks what time it is, what today's date or day is, "
+            "or when calculating times across timezones. "
+            "Defaults to South African Standard Time (SAST, UTC+2)."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "timezone_name": {
+                    "type": "STRING",
+                    "description": "Optional timezone name or city. Default is 'Africa/Johannesburg' (South African Standard Time)."
+                }
+            },
+            "required": []
+        }
+    },
+    {
         "name": "youtube_video",
         "description": (
             "Controls YouTube. Use for: playing videos, summarizing a video's content, "
@@ -855,7 +874,7 @@ class JarvisLive:
         self.speak(f"Sir, {tool_name} encountered an error. {short}")
 
     def _build_config(self) -> types.LiveConnectConfig:
-        from datetime import datetime
+        from core.time_util import get_sast_now, get_sast_time_str
 
         memory     = load_memory()
         # RAG: Use the last user speech to fetch relevant context
@@ -863,11 +882,13 @@ class JarvisLive:
         mem_str    = format_memory_for_prompt(memory, query=last_speech)
         sys_prompt = _load_system_prompt()
 
-        now      = datetime.now()
-        time_str = now.strftime("%A, %B %d, %Y — %I:%M %p")
+        now      = get_sast_now()
+        time_str = get_sast_time_str("%A, %B %d, %Y — %I:%M %p")
         time_ctx = (
             f"[CURRENT DATE & TIME]\n"
-            f"Right now it is: {time_str}\n"
+            f"Right now it is: {time_str} (South African Standard Time / SAST, UTC+2).\n"
+            f"Your default timezone is South African Standard Time (SAST, UTC+2).\n"
+            f"Always answer time, date, or schedule questions using South African Standard Time (SAST).\n"
             f"Use this to calculate exact times for reminders.\n\n"
         )
 
@@ -938,6 +959,11 @@ class JarvisLive:
         r.register("reminder",
             lambda args: reminder(parameters=args, response=None, player=ui),
             timeout=10)
+
+        from core.time_util import handle_get_current_time
+        r.register("get_current_time",
+            lambda args: handle_get_current_time(timezone_name=args.get("timezone_name", "")),
+            timeout=5)
 
         r.register("youtube_video",
             lambda args: youtube_video(parameters=args, response=None, player=ui),
@@ -1267,10 +1293,11 @@ class JarvisLive:
                             if full_in:
                                 self.ui.write_log(f"You: {full_in}")
                                 if self._dashboard:
+                                    from core.time_util import get_sast_now
                                     asyncio.create_task(self._dashboard.broadcast({
                                         "type": "log", "speaker": "user",
                                         "text": full_in,
-                                        "ts": datetime.now().isoformat(),
+                                        "ts": get_sast_now().isoformat(),
                                     }))
                             in_buf = []
 
@@ -1278,10 +1305,11 @@ class JarvisLive:
                             if full_out:
                                 self.ui.write_log(f"Jarvis: {full_out}")
                                 if self._dashboard:
+                                    from core.time_util import get_sast_now
                                     asyncio.create_task(self._dashboard.broadcast({
                                         "type": "log", "speaker": "jarvis",
                                         "text": full_out,
-                                        "ts": datetime.now().isoformat(),
+                                        "ts": get_sast_now().isoformat(),
                                     }))
                             out_buf = []
 

@@ -156,7 +156,8 @@ class PerceptionEngine:
             if response.text:
                 data = json.loads(response.text)
                 with self._lock:
-                    self.current_state["last_update"] = datetime.now().isoformat()
+                    from core.time_util import get_sast_now
+                    self.current_state["last_update"] = get_sast_now().isoformat()
                     self.current_state["elements"] = data.get("elements", [])
                     self.current_state["screen_text"] = data.get("text", "")
                     # print(f"[Perception] 🧠 State updated. Found {len(self.current_state['elements'])} elements.")

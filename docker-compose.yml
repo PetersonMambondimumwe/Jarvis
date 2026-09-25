@@ -20,5 +20,7 @@ services:
       - PYTHONUNBUFFERED=1
       - HEADLESS=1
       - DISPLAY=:99
+      - TZ=Africa/Johannesburg
+      - JARVIS_TIMEZONE=Africa/Johannesburg
     # IPC and shm configuration for high-throughput audio queues
     shm_size: '512m'

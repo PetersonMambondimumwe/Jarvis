@@ -304,7 +304,9 @@ def reminder(
     except ValueError:
         return "I couldn't parse that date or time. Please use YYYY-MM-DD and HH:MM."
 
-    if target_dt <= datetime.now():
+    from core.time_util import get_sast_now
+    now_sast = get_sast_now().replace(tzinfo=None)
+    if target_dt <= now_sast:
         return "That time has already passed — I can't set a reminder in the past."
 
     os_name    = _get_os()

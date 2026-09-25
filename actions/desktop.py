@@ -387,7 +387,8 @@ def list_desktop() -> str:
 def clean_desktop() -> str:
     desktop     = _get_desktop()
     skip_exts   = _SKIP_EXTENSIONS.get(_OS, set())
-    today       = datetime.now().strftime("%Y-%m-%d")
+    from core.time_util import get_sast_today
+    today       = get_sast_today()
     archive_dir = desktop / f"Desktop Archive {today}"
     archive_dir.mkdir(exist_ok=True)
 

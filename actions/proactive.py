@@ -46,9 +46,9 @@ class ProactiveEngine:
         Gemini reads it and decides freely what — if anything — to say.
         """
         from memory.memory_manager import format_memory_for_prompt
+        from core.time_util import get_sast_time_str
 
-        now      = datetime.now()
-        time_str = now.strftime("%A, %B %d, %Y — %I:%M %p")
+        time_str = get_sast_time_str("%A, %B %d, %Y — %I:%M %p")
         mem_str  = format_memory_for_prompt(memory) or "(no user data stored yet)"
 
         silence_min = int((time.monotonic() - self._last_triggered +

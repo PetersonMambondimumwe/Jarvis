@@ -3,6 +3,7 @@ import json
 import time
 import uuid
 from datetime import datetime
+from core.time_util import get_sast_now as _get_now
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -108,7 +109,7 @@ class TaskManager:
                     task_info["last_update"] = latest_message
                     task_info["status"] = "completed"
                     task_info["result"] = latest_message
-                    task_info["completed_at"] = datetime.now().isoformat()
+                    task_info["completed_at"] = _get_now().isoformat()
                     self._save_tasks()
                     self._log(f"Task {task_id} completed.")
                     await self._notify_user(task_id, "completed", latest_message)
@@ -199,7 +200,7 @@ class TaskManager:
             "task_description": task_description,
             "conversation_id": conversation_id,
             "status": "pending",
-            "created_at": datetime.now().isoformat(),
+            "created_at": _get_now().isoformat(),
             "retries": 0,
             # Seed last_update with the initial response so the poller waits
             # for a genuinely new message before marking the task completed.
@@ -226,7 +227,7 @@ class TaskManager:
             "task_description": task_description,
             "conversation_id": conversation_id,
             "status": "pending",
-            "created_at": datetime.now().isoformat(),
+            "created_at": _get_now().isoformat(),
             "retries": 0,
             "last_update": None,
             "result": None,
@@ -301,7 +302,7 @@ class TaskManager:
                 if reply:
                     task_info["status"] = "completed"
                     task_info["result"] = reply
-                    task_info["completed_at"] = datetime.now().isoformat()
+                    task_info["completed_at"] = _get_now().isoformat()
                     task_info["last_update"] = reply
                     self._save_tasks()
                     self._log(f"Async task {task_id} completed immediately.")
@@ -335,7 +336,7 @@ class TaskManager:
                 text = _response_text(response)
                 task_info["status"] = "completed"
                 task_info["result"] = text
-                task_info["completed_at"] = datetime.now().isoformat()
+                task_info["completed_at"] = _get_now().isoformat()
                 self._save_tasks()
                 await self._notify_user(task_id, "completed", text)
 

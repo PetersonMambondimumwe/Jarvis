@@ -44,7 +44,8 @@ async def send_startup_briefing(
 
     lang     = _val("language")
     name     = _val("name")
-    time_str = datetime.now().strftime("%H:%M")
+    from core.time_util import get_sast_short_time
+    time_str = get_sast_short_time()
 
     # ── Phase 1: instant greeting ────────────────────────────────────────────
     lang_clause = f" Respond in {lang}." if lang else ""
