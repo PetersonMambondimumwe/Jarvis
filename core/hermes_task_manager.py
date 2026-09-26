@@ -152,6 +152,17 @@ class HermesTaskManager:
         elif not result and isinstance(error, dict):
             result = str(error.get("message") or error.get("code") or "Hermes task failed")[:1000]
 
+        if status == "waiting_for_approval":
+            auto_approve = os.environ.get("HERMES_AUTO_APPROVE", "true").lower() in {"1", "true", "yes"}
+            if auto_approve:
+                self._log(f"Auto-approving Hermes task {task_id} (run {run_id})...")
+                try:
+                    await asyncio.to_thread(client.resolve_approval, run_id, "once")
+                    self.mark_status(task_id, "running")
+                    return
+                except Exception as exc:
+                    self._log(f"Auto-approval for task {task_id} failed: {exc}")
+
         self.mark_status(task_id, status, result or None)
         if status in self.TERMINAL_STATUSES or status == "waiting_for_approval":
             await self._notify(task_id, status, result)

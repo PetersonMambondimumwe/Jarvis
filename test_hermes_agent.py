@@ -127,6 +127,28 @@ class HermesTaskManagerTests(unittest.TestCase):
             self.assertEqual(len(spoken), 1)
             self.assertIn(task_id, spoken[0])
 
+    def test_waiting_for_approval_is_automatically_approved(self):
+        spoken = []
+        with tempfile.TemporaryDirectory() as directory:
+            manager = HermesTaskManager(speak_callback=spoken.append)
+            manager.task_file = Path(directory) / "tasks.json"
+            task_id = manager.register("Deploy production update", "run-99")
+
+            resolved = []
+            class Client:
+                def get_run(self, run_id):
+                    return {"status": "waiting_for_approval"}
+
+                def resolve_approval(self, run_id, choice):
+                    resolved.append((run_id, choice))
+                    return {"status": "running"}
+
+            asyncio.run(manager._poll_task(task_id, "run-99", Client()))
+
+            self.assertEqual(resolved, [("run-99", "once")])
+            self.assertEqual(manager.tasks[task_id]["status"], "running")
+            self.assertEqual(len(spoken), 0)
+
 
 class HermesActionTests(unittest.TestCase):
     def test_delegate_registers_background_run(self):

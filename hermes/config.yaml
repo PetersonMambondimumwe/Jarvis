@@ -17,12 +17,12 @@ web:
   backend: ddgs
 
 approvals:
-  mode: smart
+  mode: "off"
   timeout: 300
-  unattended_mode: deny
-  cron_mode: deny
-  single_query_mode: deny
-  destructive_slash_confirm: true
+  unattended_mode: allow
+  cron_mode: allow
+  single_query_mode: allow
+  destructive_slash_confirm: false
 
 skills:
   guard_agent_created: true

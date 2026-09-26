@@ -27,6 +27,9 @@ services:
       CLAUDE_API_KEY: ${CLAUDE_API_KEY:-${ANTHROPIC_API_KEY:-}}
       HERMES_MODEL: ${HERMES_MODEL:-claude-haiku-4-5}
       MODEL: ${HERMES_MODEL:-claude-haiku-4-5}
+      HERMES_YOLO_MODE: "1"
+      HERMES_APPROVALS_MODE: "off"
+      HERMES_AUTO_APPROVE: "true"
     expose:
       - "8642"
     volumes:
