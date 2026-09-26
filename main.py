@@ -407,7 +407,10 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "code_helper",
-        "description": "Writes, edits, explains, runs, or builds code files.",
+        "description": (
+            "Quick code syntax lookup or explanation. DO NOT use for user requests to write, build, "
+            "or run code; all user coding and script execution tasks MUST be delegated to hermes_agent."
+        ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
@@ -425,7 +428,10 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "dev_agent",
-        "description": "Builds complete multi-file projects from scratch: plans, writes files, installs deps, opens VSCode, runs and fixes errors.",
+        "description": (
+            "Legacy project builder. DO NOT use for user requests; all project building and multi-step "
+            "technical tasks MUST be delegated to hermes_agent."
+        ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
@@ -756,12 +762,12 @@ TOOL_DECLARATIONS = [
     {
         "name": "hermes_agent",
         "description": (
-            "Delegates tasks to Hermes, the dedicated execution agent with full access and "
-            "execution authority over GitHub repositories and Vercel projects. Use Hermes for "
-            "executing multi-step tasks, repository actions (issues, PRs, branches, commits, code "
-            "changes), and Vercel operations (deployments, build logs, environment variables, "
-            "domains, redeploying) while Jarvis remains available as the personal assistant. "
-            "Also checks status, cancels tasks, and handles approvals."
+            "Primary autonomous task executor for Sir Peterson. "
+            "Use this tool to delegate ANY coding, script writing, software development, "
+            "bug fixing, terminal command execution, file generation, automation workflow, "
+            "GitHub repository action (issues, PRs, branches, commits), or Vercel deployment/operation to Hermes. "
+            "Whenever the user asks you to do, build, write, create, fix, run, deploy, or execute something, "
+            "call this tool immediately with action='delegate' and task='<detailed instruction>'."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -772,7 +778,7 @@ TOOL_DECLARATIONS = [
                 },
                 "task": {
                     "type": "STRING",
-                    "description": "Complete, specific task for Hermes to execute (e.g. GitHub repo action, code change, or Vercel deployment/operation)."
+                    "description": "Complete, specific task instruction for Hermes to execute."
                 },
                 "task_id": {
                     "type": "STRING",
@@ -823,9 +829,8 @@ TOOL_DECLARATIONS = [
     {
         "name": "antigravity_bridge",
         "description": (
-            "Delegates complex coding, full-stack software development, code refactoring, bug fixing, "
-            "test running, or multi-file programming tasks directly to Antigravity, your autonomous AI developer. "
-            "Use this whenever the user asks to build features, fix code, inspect repository files, or execute development plans."
+            "Specialized developer bridge to Antigravity IDE. For all standard coding and user task execution, "
+            "always prefer hermes_agent unless Sir Peterson explicitly asks for Antigravity by name."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -1110,13 +1115,29 @@ class JarvisLive:
             lambda args: desktop_control(parameters=args, player=ui),
             timeout=10)
 
-        r.register("code_helper",
-            lambda args: code_helper(parameters=args, player=ui, speak=self.speak),
-            timeout=60)
+        def _code_helper_handler(args):
+            act = str(args.get("action") or "auto").strip().lower()
+            desc = str(args.get("description") or args.get("code") or "").strip()
+            if act in {"write", "build", "run", "edit", "auto"} and desc:
+                return hermes_agent(
+                    {"action": "delegate", "task": f"Code task ({act}): {desc}"},
+                    player=ui,
+                    task_manager=self.hermes_task_manager,
+                )
+            return code_helper(parameters=args, player=ui, speak=self.speak)
 
-        r.register("dev_agent",
-            lambda args: dev_agent(parameters=args, player=ui, speak=self.speak),
-            timeout=180)
+        def _dev_agent_handler(args):
+            desc = str(args.get("description") or "").strip()
+            if desc:
+                return hermes_agent(
+                    {"action": "delegate", "task": f"Build project: {desc}"},
+                    player=ui,
+                    task_manager=self.hermes_task_manager,
+                )
+            return dev_agent(parameters=args, player=ui, speak=self.speak)
+
+        r.register("code_helper", _code_helper_handler, timeout=60)
+        r.register("dev_agent", _dev_agent_handler, timeout=180)
 
         r.register("computer_control",
             lambda args: computer_control(parameters=args, player=ui, perception=self._perception),
