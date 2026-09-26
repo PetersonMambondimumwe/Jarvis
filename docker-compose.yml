@@ -3,7 +3,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: jarvis-server
     restart: unless-stopped
     expose:
       - "8000"
@@ -44,14 +43,19 @@ services:
       - LEAF_AI_DIFY_API_KEY=${LEAF_AI_DIFY_API_KEY:-}
       - LEAF_AI_DIFY_API_URL=${LEAF_AI_DIFY_API_URL:-}
     networks:
-      - default
-      - dokploy-network
+      default:
+        aliases:
+          - jarvis-server
+          - jarvis
+      dokploy-network:
+        aliases:
+          - jarvis-server
+          - jarvis
     # IPC and shm configuration for high-throughput audio queues
     shm_size: '512m'
 
   hermes:
     image: nousresearch/hermes-agent:v2026.9.14
-    container_name: jarvis-hermes
     restart: unless-stopped
     command: ["gateway", "run"]
     env_file:
@@ -82,12 +86,17 @@ services:
       - ./hermes/config.yaml:/opt/data/config.yaml:ro
       - /root/jarvis/config/api_keys.json:/opt/data/api_keys.json:ro
     networks:
-      - default
-      - dokploy-network
+      default:
+        aliases:
+          - jarvis-hermes
+          - hermes
+      dokploy-network:
+        aliases:
+          - jarvis-hermes
+          - hermes
 
 volumes:
   jarvis-hermes-data:
-    name: jarvis-hermes-data
 
 networks:
   default:
