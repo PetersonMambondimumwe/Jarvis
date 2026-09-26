@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import time
@@ -159,7 +160,24 @@ def _desktop_send(app_name: str, receiver: str, message: str) -> str:
     return f"Message sent to {receiver} via {app_name}."
 
 def _send_whatsapp(receiver: str, message: str) -> str:
-    return _desktop_send("WhatsApp", receiver, message)
+    try:
+        from core.whatsapp_client import WhatsAppClient, load_whatsapp_config
+        config = load_whatsapp_config()
+        client = WhatsAppClient(config)
+        res = client.send_message(receiver, message)
+        clean_num = res.get("recipient", receiver)
+        msg_id = res.get("message_id")
+        id_info = f" (ID: {msg_id})" if msg_id else ""
+        return f"WhatsApp message successfully sent to {clean_num}{id_info}."
+    except Exception as exc:
+        from core.whatsapp_client import WhatsAppError
+        if not isinstance(exc, WhatsAppError) or "credentials" not in str(exc).lower():
+            return f"WhatsApp message delivery failed: {exc}"
+
+        # If Cloud API credentials are not configured, fall back to desktop automation if available
+        if _PYAUTOGUI and not os.environ.get("HEADLESS"):
+            return _desktop_send("WhatsApp", receiver, message)
+        return "WhatsApp credentials (PHONE_NUMBER_ID and WHATSAPP_TOKEN) are not configured."
 
 def _send_telegram(receiver: str, message: str) -> str:
     return _desktop_send("Telegram", receiver, message)
@@ -385,6 +403,14 @@ def send_message(
         print(f"[SendMessage] {'OK' if 'OK' in result or 'sent' in result.lower() else 'ERR'} {result}")
         if player:
             player.write_log(f"[email] {result}")
+        return result
+
+    # ── WhatsApp (Meta Cloud API / Desktop Fallback) ──────────────────────
+    if any(k in platform for k in ("whatsapp", "wp", "wapp")):
+        result = _send_whatsapp(receiver, message_text)
+        print(f"[SendMessage] {'✅' if 'sent' in result.lower() else '❌'} {result}")
+        if player:
+            player.write_log(f"[whatsapp] {result}")
         return result
 
     # ── Desktop app messaging ─────────────────────────────────────────────

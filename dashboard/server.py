@@ -911,12 +911,22 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
             except Exception as e:
                 leaf_info["error"] = str(e)[:120]
 
+            whatsapp_info: dict[str, Any] = {"configured": False}
+            try:
+                from core.whatsapp_client import load_whatsapp_config
+                w_cfg = load_whatsapp_config()
+                whatsapp_info["configured"] = True
+                whatsapp_info["phone_number_id"] = w_cfg.phone_number_id
+            except Exception as e:
+                whatsapp_info["error"] = str(e)[:120]
+
             return JSONResponse({
                 "ok": True,
                 "version": "Mark-XLVIII-v2026.9.26",
                 "linkedin": linkedin_info,
                 "hermes": hermes_info,
                 "leaf_ai": leaf_info,
+                "whatsapp": whatsapp_info,
             })
 
         @app.post("/api/config")
@@ -934,6 +944,8 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
                     "dify_api_key", "dify_api_url", "leaf_ai_dify_api_key", "leaf_ai_dify_api_url",
                     "github_pat", "github_token", "vercel_token",
                     "anthropic_api_key", "claude_api_key",
+                    "phone_number_id", "whatsapp_phone_number_id",
+                    "whatsapp_token", "whatsapp_access_token",
                 }
                 updates = {k: str(v).strip() for k, v in body.items() if k in allowed_keys and isinstance(v, (str, int))}
                 if not updates:

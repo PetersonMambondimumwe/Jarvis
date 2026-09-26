@@ -200,25 +200,25 @@ TOOL_DECLARATIONS = [
     {
         "name": "send_message",
         "description": (
-            "Sends a message to someone via WhatsApp, Telegram, or other platforms. "
-            "Also sends emails via Power Automate when platform is 'email'. "
-            "Use platform='email' whenever the user asks to send an email. "
-            "Examples: 'email ruth@gmail.com saying get well soon', "
-            "'send an email to john@example.com about the meeting'."
+            "Sends a message to someone via WhatsApp, Email, or other platforms. "
+            "For WhatsApp, pass the recipient phone number (with country code e.g. '+27712345678' or local '0712345678') "
+            "or contact name, and the message text. "
+            "Use platform='whatsapp' whenever the user asks to send a WhatsApp message or message a phone number. "
+            "Use platform='email' whenever the user asks to send an email."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
                 "receiver":     {
                     "type": "STRING",
-                    "description": "Recipient email address (for email) or contact name (for chat apps)"
+                    "description": "Recipient phone number (e.g. '+27712345678' for WhatsApp), email address (for email), or contact name"
                 },
                 "message_text": {"type": "STRING", "description": "The message body to send"},
                 "platform":     {
                     "type": "STRING",
                     "description": (
-                        "Delivery platform. Use 'email' to send via Power Automate. "
-                        "Other options: WhatsApp, Telegram, Instagram, Signal, Discord, Messenger."
+                        "Delivery platform: 'whatsapp' (for WhatsApp messages to phone numbers), "
+                        "'email' (for email via Power Automate), Telegram, Instagram, Signal, Discord, Messenger."
                     )
                 },
                 "name":        {"type": "STRING",  "description": "Recipient's first name for email greeting (e.g. 'Ruth'). Used in 'Dear [name],'"},
