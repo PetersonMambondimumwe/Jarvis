@@ -531,8 +531,9 @@ class DashboardServer:
     async def broadcast_audio(self, pcm_chunk: bytes) -> None:
         """Send raw PCM audio chunks to connected phone audio websockets."""
         dead: set[WebSocket] = set()
-        audio_clients = self._phone_audio_ws_clients | self._phone_speaker_ws_clients
-        for ws in list(audio_clients):
+        # Prefer dedicated speaker websockets; only fall back to audio_ws if no speakers exist
+        targets = list(self._phone_speaker_ws_clients) if self._phone_speaker_ws_clients else list(self._phone_audio_ws_clients)
+        for ws in targets:
             try:
                 await asyncio.wait_for(ws.send_bytes(pcm_chunk), timeout=0.2)
             except Exception:
@@ -545,8 +546,8 @@ class DashboardServer:
         """Send audio control messages (e.g. clear/stop) to connected speaker websockets."""
         msg = json.dumps({"type": "clear_audio" if action == "clear" else action})
         dead: set[WebSocket] = set()
-        audio_clients = self._phone_audio_ws_clients | self._phone_speaker_ws_clients
-        for ws in list(audio_clients):
+        targets = list(self._phone_speaker_ws_clients) if self._phone_speaker_ws_clients else list(self._phone_audio_ws_clients)
+        for ws in targets:
             try:
                 await asyncio.wait_for(ws.send_text(msg), timeout=0.2)
             except Exception:
@@ -1146,7 +1147,7 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
                 self._discard_phone_speaker(websocket)
 
         @app.websocket("/ws/phone-audio")
-        async def phone_audio_ws(websocket: WebSocket, token: str = "", playback: str = "1"):
+        async def phone_audio_ws(websocket: WebSocket, token: str = "", playback: str = "0"):
             tok = token.strip()
             if not _authorize_ws_token(tok):
                 await websocket.close(code=4001)

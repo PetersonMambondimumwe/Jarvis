@@ -1242,6 +1242,8 @@
     const MAX_PLAYBACK_AHEAD_SECONDS = 2.0;
     let _activeAudioSources = [];
     window._activeAudioSources = _activeAudioSources;
+    let _audioProcessChain = Promise.resolve();
+    let _playbackGeneration = 0;
 
     try {
       _speakerClientId = localStorage.getItem('jarvis_speaker_client_id') || '';
@@ -1256,7 +1258,9 @@
     }
 
     function _stopAllAudio() {
+      _playbackGeneration++;
       _playTime = 0;
+      _audioProcessChain = Promise.resolve();
       if (typeof _recentChunkHashes !== 'undefined') _recentChunkHashes.clear();
       for (const s of _activeAudioSources) {
         try { s.stop(); s.disconnect(); } catch (_) {}
@@ -1360,7 +1364,7 @@
       return `${u8.length}:${hash >>> 0}`;
     }
 
-    async function _playJarvisAudio(data) {
+    function _playJarvisAudio(data) {
       if (typeof data === 'string') {
         try {
           const msg = JSON.parse(data);
@@ -1371,57 +1375,66 @@
         return;
       }
       if (!_ttsEnabled) return;
-      let arrayBuf = data;
-      if (data instanceof Blob) {
-        arrayBuf = await data.arrayBuffer();
-      }
-      if (!(arrayBuf instanceof ArrayBuffer) || arrayBuf.byteLength <= 0) return;
 
-      const nowMs = Date.now();
-      const checksum = _chunkChecksum(arrayBuf);
-      for (const [k, exp] of _recentChunkHashes.entries()) {
-        if (exp < nowMs) _recentChunkHashes.delete(k);
-      }
-      if (_recentChunkHashes.has(checksum)) {
-        return; // Drop duplicate playback chunk to prevent overlapping voices
-      }
-      _recentChunkHashes.set(checksum, nowMs + 3000);
+      const gen = _playbackGeneration;
+      _audioProcessChain = _audioProcessChain.then(async () => {
+        if (gen !== _playbackGeneration || !_ttsEnabled) return;
 
-      try {
-        if (window.speechSynthesis) window.speechSynthesis.cancel();
-        const ctx = _ensureAudioCtx();
-        if (ctx.state === 'suspended') await ctx.resume();
-
-        const byteLen = arrayBuf.byteLength - (arrayBuf.byteLength % 2);
-        if (byteLen <= 0) return;
-        const pcm16 = new Int16Array(arrayBuf, 0, byteLen / 2);
-        const f32 = new Float32Array(pcm16.length);
-        for (let i = 0; i < pcm16.length; i++) {
-          f32[i] = pcm16[i] / 32768.0;
+        let arrayBuf = data;
+        if (data instanceof Blob) {
+          arrayBuf = await data.arrayBuffer();
         }
+        if (gen !== _playbackGeneration || !(arrayBuf instanceof ArrayBuffer) || arrayBuf.byteLength <= 0) return;
 
-        const buf = ctx.createBuffer(1, f32.length, 24000);
-        buf.getChannelData(0).set(f32);
-
-        const src = ctx.createBufferSource();
-        src.buffer = buf;
-        src.connect(ctx.destination);
-
-        const now = ctx.currentTime;
-        if (_playTime <= now || _playTime - now > MAX_PLAYBACK_AHEAD_SECONDS) {
-          _playTime = now + JITTER_BUFFER_SECONDS;
+        const nowMs = Date.now();
+        const checksum = _chunkChecksum(arrayBuf);
+        for (const [k, exp] of _recentChunkHashes.entries()) {
+          if (exp < nowMs) _recentChunkHashes.delete(k);
         }
-        src.start(_playTime);
-        _playTime += buf.duration;
+        if (_recentChunkHashes.has(checksum)) {
+          return; // Drop duplicate playback chunk to prevent overlapping voices
+        }
+        _recentChunkHashes.set(checksum, nowMs + 3000);
 
-        _activeAudioSources.push(src);
-        src.onended = () => {
-          const idx = _activeAudioSources.indexOf(src);
-          if (idx !== -1) _activeAudioSources.splice(idx, 1);
-        };
-      } catch (err) {
-        console.error('Audio playback error:', err);
-      }
+        try {
+          if (window.speechSynthesis) window.speechSynthesis.cancel();
+          const ctx = _ensureAudioCtx();
+          if (ctx.state === 'suspended') await ctx.resume();
+          if (gen !== _playbackGeneration) return;
+
+          const byteLen = arrayBuf.byteLength - (arrayBuf.byteLength % 2);
+          if (byteLen <= 0) return;
+          const pcm16 = new Int16Array(arrayBuf, 0, byteLen / 2);
+          const f32 = new Float32Array(pcm16.length);
+          for (let i = 0; i < pcm16.length; i++) {
+            f32[i] = pcm16[i] / 32768.0;
+          }
+
+          const buf = ctx.createBuffer(1, f32.length, 24000);
+          buf.getChannelData(0).set(f32);
+
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(ctx.destination);
+
+          const now = ctx.currentTime;
+          if (_playTime <= now || _playTime - now > MAX_PLAYBACK_AHEAD_SECONDS) {
+            _playTime = now + JITTER_BUFFER_SECONDS;
+          }
+          src.start(_playTime);
+          _playTime += buf.duration;
+
+          _activeAudioSources.push(src);
+          src.onended = () => {
+            const idx = _activeAudioSources.indexOf(src);
+            if (idx !== -1) _activeAudioSources.splice(idx, 1);
+          };
+        } catch (err) {
+          console.error('Audio playback error:', err);
+        }
+      }).catch(err => {
+        console.error('Audio playback pipeline error:', err);
+      });
     }
 
     function _closeSpeaker() {

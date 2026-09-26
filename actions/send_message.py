@@ -159,16 +159,55 @@ def _desktop_send(app_name: str, receiver: str, message: str) -> str:
     time.sleep(0.3)
     return f"Message sent to {receiver} via {app_name}."
 
+def _parse_recipients(receiver: str) -> list[tuple[str, str]]:
+    import re
+    lines = [line.strip() for line in re.split(r"[\n;,]+", receiver) if line.strip()]
+    results = []
+    for line in lines:
+        match = re.search(r"^(.*?)\s*[-:–—]\s*(\+?[\d\s().-]{7,25})$", line)
+        if match:
+            results.append((match.group(1).strip(), match.group(2).strip()))
+            continue
+        digits = re.sub(r"[^\d]", "", line)
+        if len(digits) >= 7:
+            words = line.split()
+            phone_part = words[-1] if len(re.sub(r"[^\d]", "", words[-1])) >= 7 else line
+            name_part = " ".join(words[:-1]) if phone_part != line else ""
+            results.append((name_part, phone_part))
+        else:
+            results.append(("", line))
+    return results if results else [("", receiver)]
+
 def _send_whatsapp(receiver: str, message: str) -> str:
+    recipients = _parse_recipients(receiver)
     try:
-        from core.whatsapp_client import WhatsAppClient, load_whatsapp_config
+        from core.whatsapp_client import WhatsAppClient, load_whatsapp_config, WhatsAppError
         config = load_whatsapp_config()
         client = WhatsAppClient(config)
-        res = client.send_message(receiver, message)
-        clean_num = res.get("recipient", receiver)
-        msg_id = res.get("message_id")
-        id_info = f" (ID: {msg_id})" if msg_id else ""
-        return f"WhatsApp message successfully sent to {clean_num}{id_info}."
+
+        successes = []
+        failures = []
+
+        for name, phone in recipients:
+            target_text = message
+            if name:
+                target_text = target_text.replace("[name]", name).replace("[Name]", name)
+            try:
+                res = client.send_message(phone, target_text)
+                clean_num = res.get("recipient", phone)
+                label = f"{name} ({clean_num})" if name else clean_num
+                successes.append(label)
+            except Exception as e:
+                label = f"{name} ({phone})" if name else phone
+                failures.append(f"{label}: {e}")
+
+        if not failures and successes:
+            return f"WhatsApp message successfully sent to {len(successes)} recipient(s): {', '.join(successes)}."
+        elif successes and failures:
+            return f"WhatsApp partially sent: {len(successes)} succeeded ({', '.join(successes)}), {len(failures)} failed ({'; '.join(failures)})."
+        elif failures:
+            return f"WhatsApp message delivery failed: {'; '.join(failures)}"
+        return "No valid recipients found."
     except Exception as exc:
         from core.whatsapp_client import WhatsAppError
         if not isinstance(exc, WhatsAppError) or "credentials" not in str(exc).lower():
@@ -408,7 +447,8 @@ def send_message(
     # ── WhatsApp (Meta Cloud API / Desktop Fallback) ──────────────────────
     if any(k in platform for k in ("whatsapp", "wp", "wapp")):
         result = _send_whatsapp(receiver, message_text)
-        print(f"[SendMessage] {'✅' if 'sent' in result.lower() else '❌'} {result}")
+        tag = "[OK]" if "sent" in result.lower() else "[ERR]"
+        print(f"[SendMessage] {tag} {result}")
         if player:
             player.write_log(f"[whatsapp] {result}")
         return result
@@ -423,7 +463,8 @@ def send_message(
     except Exception as e:
         result = f"Could not send message: {e}"
 
-    print(f"[SendMessage] {'✅' if 'sent' in result.lower() else '❌'} {result}")
+    tag = "[OK]" if "sent" in result.lower() else "[ERR]"
+    print(f"[SendMessage] {tag} {result}")
     if player:
         player.write_log(f"[msg] {result}")
 

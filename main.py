@@ -1577,10 +1577,10 @@ class JarvisLive:
                     continue
                 self.set_speaking(True)
 
-                # Broadcast audio chunk to phone dashboard clients
+                # Broadcast audio chunk to phone dashboard clients sequentially
                 if self._dashboard:
                     try:
-                        asyncio.create_task(self._dashboard.broadcast_audio(chunk))
+                        await self._dashboard.broadcast_audio(chunk)
                     except Exception:
                         pass
 
