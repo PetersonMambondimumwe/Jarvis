@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import uuid
 from dataclasses import dataclass
@@ -32,17 +33,19 @@ class HermesConfig:
 
 
 def load_hermes_config() -> HermesConfig:
+    data: dict[str, Any] = {}
     try:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
-        raise HermesError("config/api_keys.json is missing") from exc
+        if not (os.getenv("HERMES_API_KEY") or os.getenv("HERMES_API_BASE")):
+            raise HermesError("config/api_keys.json is missing") from exc
     except (json.JSONDecodeError, OSError) as exc:
         raise HermesError(f"Hermes configuration could not be read: {exc}") from exc
 
-    api_base = str(data.get("hermes_api_base") or "http://jarvis-hermes:8642").rstrip("/")
-    api_key = str(data.get("hermes_api_key") or "").strip()
+    api_base = str(os.getenv("HERMES_API_BASE") or data.get("hermes_api_base") or "http://jarvis-hermes:8642").rstrip("/")
+    api_key = str(os.getenv("HERMES_API_KEY") or data.get("hermes_api_key") or "").strip()
     try:
-        timeout = int(data.get("hermes_timeout_seconds") or 20)
+        timeout = int(os.getenv("HERMES_TIMEOUT_SECONDS") or data.get("hermes_timeout_seconds") or 20)
     except (TypeError, ValueError):
         timeout = 20
 
@@ -148,10 +151,18 @@ class HermesClient:
             "input": task,
             "session_id": f"jarvis-task-{task_key[:16]}",
             "instructions": (
-                "You are Jarvis's background execution worker. Complete the requested task using "
-                "available tools. Never claim an action succeeded unless a tool confirms it. "
-                "Do not reveal credentials or secret values. Return a concise result with any "
-                "remaining user action clearly identified."
+                "You are Hermes, the dedicated execution agent for Sir Peterson. "
+                "You have full execution authority and access over GitHub repositories and Vercel projects. "
+                "Available credentials in your environment include GITHUB_TOKEN (or GITHUB_PAT) and "
+                "VERCEL_TOKEN (or VERCEL_API_TOKEN), as well as /opt/data/api_keys.json. "
+                "You are responsible for executing all tasks, repository actions (issues, pull requests, "
+                "branches, commits, file changes, code inspection), and Vercel operations (deployments, "
+                "build logs, project inspection, environment variables, domains, redeploying). "
+                "Jarvis acts as the personal assistant to Sir Peterson; you are the executor who does the heavy lifting. "
+                "Execute the requested task thoroughly using your available terminal and tools. "
+                "Never claim an action succeeded unless verified. "
+                "Do not reveal secret credentials or tokens in output. "
+                "Return a concise result with any remaining user action clearly identified."
             ),
         }
         return self._request(

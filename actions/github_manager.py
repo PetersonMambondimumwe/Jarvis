@@ -34,6 +34,7 @@ Usage (tool call from Gemini)
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -51,6 +52,9 @@ CONFIG_PATH = _base_dir() / "config" / "api_keys.json"
 
 
 def _load_token() -> str:
+    env_token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_PAT")
+    if env_token and env_token.strip():
+        return env_token.strip()
     try:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         token = data.get("github_pat", "").strip()

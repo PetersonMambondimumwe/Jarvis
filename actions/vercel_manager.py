@@ -34,6 +34,7 @@ Usage (natural language → Gemini → tool call)
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,6 +61,9 @@ CONFIG_PATH = _base_dir() / "config" / "api_keys.json"
 
 
 def _load_token() -> str:
+    env_token = os.getenv("VERCEL_TOKEN") or os.getenv("VERCEL_API_TOKEN")
+    if env_token and env_token.strip():
+        return env_token.strip()
     try:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         token = data.get("vercel_token", "").strip()

@@ -42,6 +42,9 @@ class HermesClientTests(unittest.TestCase):
         self.assertEqual((method, url), ("POST", "http://jarvis-hermes:8642/v1/runs"))
         self.assertEqual(kwargs["headers"]["Idempotency-Key"], "request-1")
         self.assertEqual(kwargs["json"]["input"], "Research the latest status")
+        self.assertIn("GitHub", kwargs["json"]["instructions"])
+        self.assertIn("Vercel", kwargs["json"]["instructions"])
+        self.assertIn("execution", kwargs["json"]["instructions"].lower())
 
     def test_authentication_errors_do_not_expose_response_details(self):
         session = FakeSession([FakeResponse(401, {"error": "secret upstream detail"})])

@@ -1,3 +1,8 @@
+# Hermes Execution Agent Configuration
+# Dedicated task execution agent for Sir Peterson and Jarvis.
+# Holds execution authority over GitHub repositories (GITHUB_TOKEN / GITHUB_PAT)
+# and Vercel projects (VERCEL_TOKEN / VERCEL_API_TOKEN).
+
 model:
   default: gemini-3.7-flash
   provider: gemini

@@ -603,11 +603,11 @@ TOOL_DECLARATIONS = [
     {
         "name": "github_manager",
         "description": (
-            "Connects Jarvis to the user's GitHub account. Use this tool for any request "
-            "related to GitHub repositories, code, issues, pull requests, branches, or commits. "
-            "Examples: 'show me my repos', 'what are the open issues on Mark-XLVIII', "
-            "'create a branch called feature/dark-mode', 'read the README', "
-            "'open an issue: fix login bug', 'what changed this week on my project'."
+            "Connects Jarvis to the user's GitHub account for repository inspection and queries. "
+            "Note: Agent Hermes is the dedicated execution agent who holds full execution authority "
+            "over GitHub repositories. All active tasks, code modifications, issues, pull requests, "
+            "and branch operations should be delegated to hermes_agent. Use this tool only for quick "
+            "read-only status queries."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -659,12 +659,11 @@ TOOL_DECLARATIONS = [
     {
         "name": "vercel_manager",
         "description": (
-            "Connects Jarvis to the user's Vercel account to manage and monitor hosted websites. "
-            "Use for any request about Vercel projects, deployments, build failures, logs, domains, "
-            "or environment variables. "
-            "Examples: 'show my Vercel projects', 'are any deployments failing?', "
-            "'show me the build logs for my site', 'redeploy my portfolio', "
-            "'add an environment variable to my project', 'check deployment status'."
+            "Connects Jarvis to the user's Vercel account for inspection and queries. "
+            "Note: Agent Hermes is the dedicated execution agent who holds full execution authority "
+            "over Vercel projects. All active tasks, deployments, redeployments, log investigations, "
+            "and environment variable changes should be delegated to hermes_agent. Use this tool only "
+            "for quick read-only status queries."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -757,9 +756,12 @@ TOOL_DECLARATIONS = [
     {
         "name": "hermes_agent",
         "description": (
-            "Delegates multi-step work to Hermes for asynchronous background execution. "
-            "Use this for tasks that require tools or continued work while Jarvis remains "
-            "available. Also checks status, cancels tasks, and handles explicit approvals."
+            "Delegates tasks to Hermes, the dedicated execution agent with full access and "
+            "execution authority over GitHub repositories and Vercel projects. Use Hermes for "
+            "executing multi-step tasks, repository actions (issues, PRs, branches, commits, code "
+            "changes), and Vercel operations (deployments, build logs, environment variables, "
+            "domains, redeploying) while Jarvis remains available as the personal assistant. "
+            "Also checks status, cancels tasks, and handles approvals."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -770,7 +772,7 @@ TOOL_DECLARATIONS = [
                 },
                 "task": {
                     "type": "STRING",
-                    "description": "Complete, specific task for Hermes when delegating."
+                    "description": "Complete, specific task for Hermes to execute (e.g. GitHub repo action, code change, or Vercel deployment/operation)."
                 },
                 "task_id": {
                     "type": "STRING",
