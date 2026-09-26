@@ -388,7 +388,7 @@
     <input type="file" id="file-inp" multiple accept="*/*" style="display:none">
     <button id="mic-btn" onclick="doMic()" title="Voice command">🎤</button>
     <button class="btn btn-wake" id="wake" onclick="doWake()">WAKE</button>
-    <button class="btn btn-send" onclick="doSend()">SEND</button>
+    <button class="btn btn-send" id="send-btn" onclick="doSend()">SEND</button>
   </footer>
 
   <script>
@@ -666,7 +666,7 @@
       _ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
         if (m.type === 'log') {
-          append(m.speaker, m.text);
+          append(m.speaker, m.text, m.request_id || '');
         }
         if (m.type === 'status')        setStatus(m.state);
         if (m.type === 'wake')          sys('Wake word detected — connecting…');
@@ -720,6 +720,7 @@
     }
 
     let _lastLog = { speaker: null, text: null, ts: 0 };
+    const _renderedMessageIds = new Set();
 
     function setStatus(s) {
       if (s === 'active') {
@@ -735,7 +736,7 @@
       }
     }
 
-    function append(speaker, text) {
+    function append(speaker, text, messageId = '') {
       let clean = (text || '').trim();
       if (speaker === 'jarvis' && clean.toLowerCase().startsWith('jarvis:')) {
         clean = clean.substring(7).trim();
@@ -744,11 +745,21 @@
       }
       if (!clean) return false;
 
+      if (messageId && _renderedMessageIds.has(messageId)) {
+        return false;
+      }
+
       const now = Date.now();
-      if (_lastLog.speaker === speaker && _lastLog.text === clean && (now - _lastLog.ts < 3500)) {
+      if (!messageId && _lastLog.speaker === speaker && _lastLog.text === clean && (now - _lastLog.ts < 3500)) {
         return false;
       }
       _lastLog = { speaker, text: clean, ts: now };
+      if (messageId) {
+        _renderedMessageIds.add(messageId);
+        if (_renderedMessageIds.size > 1000) {
+          _renderedMessageIds.delete(_renderedMessageIds.values().next().value);
+        }
+      }
 
       const d = document.createElement('div');
       if (speaker === 'jarvis') {
@@ -893,21 +904,42 @@
     });
 
     // ── Commands ──────────────────────────────────────────────────────────────
-    function doSend() {
+    let _textSendInFlight = false;
+
+    function _newCommandId() {
+      if (crypto.randomUUID) return crypto.randomUUID();
+      return `cmd-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+
+    async function doSend() {
+      if (_textSendInFlight) return;
       const inp = document.getElementById('inp');
+      const sendBtn = document.getElementById('send-btn');
       const txt = inp.value.trim();
       if (!txt) return;
+      const requestId = _newCommandId();
       inp.value = '';
-      append('user', txt);
+      append('user', txt, requestId);
       _ensureAudioCtx();
       _connectSpeaker();
       const enc  = _encrypt(txt);
-      const body = enc ? { enc } : { text: txt };
-      _authFetch('/api/command', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
+      const body = enc ? { enc, request_id: requestId } : { text: txt, request_id: requestId };
+      _textSendInFlight = true;
+      if (sendBtn) sendBtn.disabled = true;
+      try {
+        const response = await _authFetch('/api/command', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      } catch (_) {
+        inp.value = txt;
+        toast('Message could not be sent. Tap SEND to retry.');
+      } finally {
+        _textSendInFlight = false;
+        if (sendBtn) sendBtn.disabled = false;
+      }
     }
 
     function doWake() {
@@ -916,7 +948,7 @@
     }
 
     document.getElementById('inp').addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
+      if (e.key === 'Enter' && !e.shiftKey && !e.repeat) { e.preventDefault(); doSend(); }
     });
 
     // ── Toast ─────────────────────────────────────────────────────────────────

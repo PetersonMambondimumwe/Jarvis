@@ -815,6 +815,8 @@ class JarvisLive:
         self._vision_busy          = False   # True while a vision capture/inject cycle is in flight
         self._interrupted          = False   # True while draining audio after user interrupt
         self._pending_text_command = ""      # Text turns may not receive input transcription
+        self._pending_text_command_id = ""
+        self._command_done_event: asyncio.Event | None = None
         self.ui.on_text_command   = self._on_text_command
         self.ui.on_remote_clicked = self._make_remote_key
         self.ui.on_interrupt      = self.interrupt
@@ -1325,11 +1327,15 @@ class JarvisLive:
                         if sc.turn_complete:
                             if self._turn_done_event:
                                 self._turn_done_event.set()
+                            if self._command_done_event:
+                                self._command_done_event.set()
 
                             # If this turn_complete ends an interrupted response, clear the
                             # flag and skip all further processing for that turn.
                             if self._interrupted:
                                 self._interrupted = False
+                                self._pending_text_command = ""
+                                self._pending_text_command_id = ""
                                 in_buf  = []
                                 out_buf = []
                                 continue
@@ -1337,16 +1343,21 @@ class JarvisLive:
                             full_in = " ".join(in_buf).strip()
                             if not full_in and self._pending_text_command:
                                 full_in = self._pending_text_command
+                            full_in_request_id = self._pending_text_command_id
                             self._pending_text_command = ""
+                            self._pending_text_command_id = ""
                             if full_in:
                                 self.ui.write_log(f"You: {full_in}")
                                 if self._dashboard:
                                     from core.time_util import get_sast_now
-                                    asyncio.create_task(self._dashboard.broadcast({
+                                    user_log = {
                                         "type": "log", "speaker": "user",
                                         "text": full_in,
                                         "ts": get_sast_now().isoformat(),
-                                    }))
+                                    }
+                                    if full_in_request_id:
+                                        user_log["request_id"] = full_in_request_id
+                                    asyncio.create_task(self._dashboard.broadcast(user_log))
                             in_buf = []
 
                             full_out = " ".join(out_buf).strip()
@@ -1561,9 +1572,15 @@ class JarvisLive:
     async def _process_dashboard_commands(self) -> None:
         while True:
             try:
-                text = await asyncio.wait_for(
+                command = await asyncio.wait_for(
                     self._dashboard._command_queue.get(), timeout=0.5
                 )
+                if isinstance(command, dict):
+                    text = str(command.get("text") or "").strip()
+                    request_id = str(command.get("request_id") or "").strip()
+                else:
+                    text = str(command or "").strip()
+                    request_id = ""
                 if not text:
                     continue
                 # Wait up to 8s for session to become ready after a wake
@@ -1573,11 +1590,20 @@ class JarvisLive:
                     await asyncio.sleep(0.1)
                 if self.session:
                     self._pending_text_command = text.strip()
+                    self._pending_text_command_id = request_id
+                    command_done = self._command_done_event
+                    if command_done:
+                        command_done.clear()
                     await self.session.send_client_content(
                         turns={"parts": [{"text": text}]},
                         turn_complete=True,
                     )
                     self.ui.write_log(f"[Web]: {text}")
+                    if command_done:
+                        try:
+                            await asyncio.wait_for(command_done.wait(), timeout=120)
+                        except asyncio.TimeoutError:
+                            print("[Dashboard] Text command timed out waiting for turn completion")
                 else:
                     print(f"[Dashboard] Dropped command (no session): {text}")
             except asyncio.TimeoutError:

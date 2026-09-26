@@ -70,6 +70,7 @@ async def run_session_loop(
                 jarvis.audio_in_queue   = asyncio.Queue()
                 jarvis.out_queue        = asyncio.Queue(maxsize=200)
                 jarvis._turn_done_event = asyncio.Event()
+                jarvis._command_done_event = asyncio.Event()
 
                 # Reset all transient flags that must not carry over from a
                 # crashed or expired session.
@@ -79,6 +80,8 @@ async def run_session_loop(
                 jarvis._vision_busy          = False
                 jarvis._vision_last_time     = 0.0
                 jarvis._interrupted          = False
+                jarvis._pending_text_command = ""
+                jarvis._pending_text_command_id = ""
                 jarvis._db_cache_initialized = True
 
                 print("[JARVIS] Connected.")

@@ -379,6 +379,7 @@ class DashboardServer:
         self._history: list[dict]         = []
         self._current_status: dict        = {"type": "status", "state": "starting"}
         self._command_queue               = asyncio.Queue()
+        self._recent_commands: dict[str, float] = {}
         self._wake_callback               = None
         self._connect_callback            = None
         self._pending_keys: dict[str, float] = {}
@@ -392,6 +393,41 @@ class DashboardServer:
         self._login_html                  = _read("login.html")
         self._app_html                    = _read("app.html")
         self.app                          = self._build_app()
+
+    async def enqueue_command(
+        self,
+        text: str,
+        request_id: str = "",
+        source: str = "",
+    ) -> bool:
+        """Queue one text command and reject duplicate client retries."""
+        text = text.strip()
+        if not text:
+            return False
+
+        now = time.monotonic()
+        self._recent_commands = {
+            key: expires
+            for key, expires in self._recent_commands.items()
+            if expires > now
+        }
+
+        clean_id = re.sub(r"[^A-Za-z0-9._:-]", "", request_id.strip())[:128]
+        if clean_id:
+            dedupe_key = f"id:{clean_id}"
+            ttl = 300.0
+        else:
+            fingerprint = hashlib.sha256(
+                f"{source}\0{text}".encode("utf-8", "replace")
+            ).hexdigest()
+            dedupe_key = f"legacy:{fingerprint}"
+            ttl = 2.5
+
+        if dedupe_key in self._recent_commands:
+            return False
+        self._recent_commands[dedupe_key] = now + ttl
+        await self._command_queue.put({"text": text, "request_id": clean_id})
+        return True
 
     def _load_sessions(self) -> None:
         try:
@@ -753,11 +789,13 @@ class DashboardServer:
                     return JSONResponse({"error": "Decryption failed"}, status_code=400)
             else:
                 text = (body.get("text") or "").strip()
+            request_id = (body.get("request_id") or "").strip()
+            queued = False
             if text:
-                await self._command_queue.put(text)
-                if self._wake_callback:
+                queued = await self.enqueue_command(text, request_id, token)
+                if queued and self._wake_callback:
                     self._wake_callback()
-            return JSONResponse({"ok": True})
+            return JSONResponse({"ok": True, "queued": queued})
 
         @app.post("/api/wake")
         async def wake_ep(req: Request):
@@ -979,8 +1017,12 @@ class DashboardServer:
                         enc = data.get("enc", "")
                         t   = self._decrypt(tok, enc) if enc else (data.get("text") or "").strip()
                         if t:
-                            await self._command_queue.put(t)
-                            if self._wake_callback:
+                            queued = await self.enqueue_command(
+                                t,
+                                data.get("request_id", ""),
+                                tok,
+                            )
+                            if queued and self._wake_callback:
                                 self._wake_callback()
             except WebSocketDisconnect:
                 pass
