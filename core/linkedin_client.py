@@ -22,6 +22,8 @@ def _base_dir() -> Path:
 
 
 TOKEN_PATH = _base_dir() / "memory" / "linkedin_token.enc"
+CONFIG_PATH = _base_dir() / "config" / "api_keys.json"
+ENV_PATH = _base_dir() / ".env"
 AUTHORIZATION_URL = "https://www.linkedin.com/oauth/v2/authorization"
 TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
 USERINFO_URL = "https://api.linkedin.com/v2/userinfo"
@@ -40,17 +42,66 @@ class LinkedInConfig:
     timeout: int = 20
 
 
+def _read_env_file(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    env_vars: dict[str, str] = {}
+    try:
+        content = path.read_text(encoding="utf-8")
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            v = v.strip().strip("'\"")
+            if k:
+                env_vars[k] = v
+    except Exception:
+        pass
+    return env_vars
+
+
+def _read_config_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 def load_linkedin_config() -> LinkedInConfig:
-    client_id = os.environ.get("LINKEDIN_CLIENT_ID", "").strip()
-    client_secret = (
-        os.environ.get("LINKEDIN_CLIENT_SECRET", "").strip()
-        or os.environ.get("LINKEDIN_PRIMARY_CLIENT_SECRET", "").strip()
-        or os.environ.get("LINKEDIN_PRIMARY_CLIENT_SECTRET", "").strip()
+    env_vars = _read_env_file(ENV_PATH)
+    config_vars = _read_config_json(CONFIG_PATH)
+
+    def _lookup(*keys: str) -> str:
+        for k in keys:
+            val = os.environ.get(k, "").strip()
+            if val:
+                return val
+        for k in keys:
+            val = env_vars.get(k, "").strip()
+            if val:
+                return val
+        for k in keys:
+            val = str(config_vars.get(k, "") or config_vars.get(k.lower(), "")).strip()
+            if val:
+                return val
+        return ""
+
+    client_id = _lookup("LINKEDIN_CLIENT_ID", "linkedin_client_id")
+    client_secret = _lookup(
+        "LINKEDIN_CLIENT_SECRET",
+        "LINKEDIN_PRIMARY_CLIENT_SECRET",
+        "LINKEDIN_PRIMARY_CLIENT_SECTRET",
+        "linkedin_client_secret",
+        "linkedin_primary_client_secret",
     )
-    redirect_uri = os.environ.get(
-        "LINKEDIN_REDIRECT_URI",
-        "https://jarvis.littleheartsacademy.online/auth/linkedin/callback",
-    ).strip()
+    redirect_uri = (
+        _lookup("LINKEDIN_REDIRECT_URI", "linkedin_redirect_uri")
+        or "https://jarvis.littleheartsacademy.online/auth/linkedin/callback"
+    )
 
     if not client_id or not client_secret:
         raise LinkedInError("LinkedIn client credentials are not configured")
