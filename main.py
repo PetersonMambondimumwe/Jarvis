@@ -73,6 +73,7 @@ from actions.database_manager   import database_manager, db_cleanup
 from actions.proactive         import ProactiveEngine
 from actions.edith_agent        import edith_agent
 from actions.hermes_agent       import hermes_agent
+from actions.linkedin_agent     import linkedin_agent
 from actions.github_manager     import github_manager
 from actions.vercel_manager     import vercel_manager
 from actions.antigravity_bridge import antigravity_bridge
@@ -778,6 +779,36 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "linkedin_agent",
+        "description": (
+            "Manages Jarvis's authorized LinkedIn account. Checks connection status and prepares, "
+            "publishes, or discards text-post drafts. Preparing never publishes. Publishing requires "
+            "the user to explicitly approve the exact prepared draft first."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "status | prepare_post | publish_post | discard_post"
+                },
+                "content": {
+                    "type": "STRING",
+                    "description": "Exact post text for prepare_post. Maximum 3,000 characters."
+                },
+                "draft_id": {
+                    "type": "STRING",
+                    "description": "Prepared draft ID for publish_post or discard_post."
+                },
+                "confirmed": {
+                    "type": "BOOLEAN",
+                    "description": "True only after the user explicitly approves the exact draft."
+                }
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "memory_status",
         "description": (
             "Checks whether Jarvis's self-hosted Honcho long-term memory is "
@@ -1099,6 +1130,10 @@ class JarvisLive:
                 player=ui,
                 task_manager=self.hermes_task_manager,
             ),
+            timeout=30)
+
+        r.register("linkedin_agent",
+            lambda args: linkedin_agent(parameters=args),
             timeout=30)
 
         r.register("github_manager",

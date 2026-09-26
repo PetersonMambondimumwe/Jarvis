@@ -1,0 +1,276 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlencode, urlparse
+
+import requests
+from cryptography.fernet import Fernet, InvalidToken
+
+
+def _base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parent.parent
+
+
+TOKEN_PATH = _base_dir() / "memory" / "linkedin_token.enc"
+AUTHORIZATION_URL = "https://www.linkedin.com/oauth/v2/authorization"
+TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
+USERINFO_URL = "https://api.linkedin.com/v2/userinfo"
+UGC_POSTS_URL = "https://api.linkedin.com/v2/ugcPosts"
+
+
+class LinkedInError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class LinkedInConfig:
+    client_id: str
+    client_secret: str
+    redirect_uri: str
+    timeout: int = 20
+
+
+def load_linkedin_config() -> LinkedInConfig:
+    client_id = os.environ.get("LINKEDIN_CLIENT_ID", "").strip()
+    client_secret = (
+        os.environ.get("LINKEDIN_CLIENT_SECRET", "").strip()
+        or os.environ.get("LINKEDIN_PRIMARY_CLIENT_SECRET", "").strip()
+        or os.environ.get("LINKEDIN_PRIMARY_CLIENT_SECTRET", "").strip()
+    )
+    redirect_uri = os.environ.get(
+        "LINKEDIN_REDIRECT_URI",
+        "https://jarvis.littleheartsacademy.online/auth/linkedin/callback",
+    ).strip()
+
+    if not client_id or not client_secret:
+        raise LinkedInError("LinkedIn client credentials are not configured")
+    parsed = urlparse(redirect_uri)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise LinkedInError("LinkedIn redirect URI must be a valid HTTPS URL")
+    return LinkedInConfig(client_id, client_secret, redirect_uri)
+
+
+class LinkedInTokenStore:
+    def __init__(self, config: LinkedInConfig, path: Path = TOKEN_PATH):
+        self.path = path
+        key_material = os.environ.get("LINKEDIN_TOKEN_ENCRYPTION_KEY", "").strip()
+        if not key_material:
+            key_material = f"{config.client_id}\0{config.client_secret}"
+        digest = hashlib.sha256(key_material.encode("utf-8")).digest()
+        self._fernet = Fernet(base64.urlsafe_b64encode(digest))
+
+    def save(self, token: dict[str, Any]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        encoded = json.dumps(token, separators=(",", ":")).encode("utf-8")
+        temp = self.path.with_suffix(".tmp")
+        temp.write_bytes(self._fernet.encrypt(encoded))
+        try:
+            os.chmod(temp, 0o600)
+        except OSError:
+            pass
+        temp.replace(self.path)
+
+    def load(self) -> dict[str, Any] | None:
+        if not self.path.exists():
+            return None
+        try:
+            raw = self._fernet.decrypt(self.path.read_bytes())
+            data = json.loads(raw.decode("utf-8"))
+        except (InvalidToken, OSError, ValueError, TypeError) as exc:
+            raise LinkedInError("LinkedIn authorization data could not be read; reconnect LinkedIn") from exc
+        return data if isinstance(data, dict) else None
+
+    def clear(self) -> None:
+        try:
+            self.path.unlink(missing_ok=True)
+        except OSError as exc:
+            raise LinkedInError("LinkedIn authorization data could not be removed") from exc
+
+
+class LinkedInClient:
+    def __init__(
+        self,
+        config: LinkedInConfig,
+        session: requests.Session | None = None,
+        store: LinkedInTokenStore | None = None,
+    ):
+        self.config = config
+        self.session = session or requests.Session()
+        self.store = store or LinkedInTokenStore(config)
+
+    def authorization_url(self, state: str) -> str:
+        query = urlencode(
+            {
+                "response_type": "code",
+                "client_id": self.config.client_id,
+                "redirect_uri": self.config.redirect_uri,
+                "state": state,
+                "scope": "openid profile email w_member_social",
+            }
+        )
+        return f"{AUTHORIZATION_URL}?{query}"
+
+    def exchange_code(self, code: str) -> dict[str, Any]:
+        if not code.strip():
+            raise LinkedInError("LinkedIn did not return an authorization code")
+        try:
+            response = self.session.post(
+                TOKEN_URL,
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "client_id": self.config.client_id,
+                    "client_secret": self.config.client_secret,
+                    "redirect_uri": self.config.redirect_uri,
+                },
+                headers={"Accept": "application/json"},
+                timeout=self.config.timeout,
+            )
+        except requests.RequestException as exc:
+            raise LinkedInError("LinkedIn is unreachable during authorization") from exc
+
+        body = self._json(response)
+        if response.status_code >= 400:
+            description = str(body.get("error_description") or body.get("error") or "authorization failed")
+            raise LinkedInError(f"LinkedIn authorization failed: {description[:200]}")
+
+        access_token = str(body.get("access_token") or "").strip()
+        if not access_token:
+            raise LinkedInError("LinkedIn did not return an access token")
+        try:
+            expires_in = max(60, int(body.get("expires_in") or 3600))
+        except (TypeError, ValueError):
+            expires_in = 3600
+
+        token = {
+            "access_token": access_token,
+            "expires_at": int(time.time()) + expires_in,
+            "scope": str(body.get("scope") or ""),
+        }
+        profile = self._request_userinfo(access_token)
+        token["profile"] = {
+            "sub": str(profile.get("sub") or ""),
+            "name": str(profile.get("name") or "LinkedIn member"),
+            "email": str(profile.get("email") or ""),
+        }
+        if not token["profile"]["sub"]:
+            raise LinkedInError("LinkedIn profile response did not include a member ID")
+        self.store.save(token)
+        return token
+
+    def status(self) -> dict[str, Any]:
+        token = self.store.load()
+        if not token:
+            return {"configured": True, "connected": False, "reason": "not_connected"}
+        expires_at = int(token.get("expires_at") or 0)
+        profile = token.get("profile") if isinstance(token.get("profile"), dict) else {}
+        if expires_at <= int(time.time()) + 60:
+            return {
+                "configured": True,
+                "connected": False,
+                "reason": "expired",
+                "name": str(profile.get("name") or "LinkedIn member"),
+                "expires_at": expires_at,
+            }
+        return {
+            "configured": True,
+            "connected": True,
+            "name": str(profile.get("name") or "LinkedIn member"),
+            "expires_at": expires_at,
+        }
+
+    def publish_text(self, commentary: str) -> str:
+        commentary = commentary.strip()
+        if not commentary:
+            raise LinkedInError("LinkedIn post text is empty")
+        if len(commentary) > 3000:
+            raise LinkedInError("LinkedIn post text exceeds 3,000 characters")
+
+        token = self._valid_token()
+        profile = token.get("profile") if isinstance(token.get("profile"), dict) else {}
+        member_id = str(profile.get("sub") or "").strip()
+        if not member_id:
+            raise LinkedInError("LinkedIn member ID is missing; reconnect LinkedIn")
+        payload = {
+            "author": f"urn:li:person:{member_id}",
+            "lifecycleState": "PUBLISHED",
+            "specificContent": {
+                "com.linkedin.ugc.ShareContent": {
+                    "shareCommentary": {"text": commentary},
+                    "shareMediaCategory": "NONE",
+                }
+            },
+            "visibility": {
+                "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"
+            },
+        }
+        try:
+            response = self.session.post(
+                UGC_POSTS_URL,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {token['access_token']}",
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "X-Restli-Protocol-Version": "2.0.0",
+                },
+                timeout=self.config.timeout,
+            )
+        except requests.RequestException as exc:
+            raise LinkedInError("LinkedIn is unreachable while publishing") from exc
+
+        if response.status_code != 201:
+            body = self._json(response)
+            if response.status_code == 401:
+                raise LinkedInError("LinkedIn authorization expired; reconnect LinkedIn")
+            if response.status_code == 403:
+                raise LinkedInError("LinkedIn denied posting; enable Share on LinkedIn for the app")
+            message = str(body.get("message") or f"HTTP {response.status_code}")
+            raise LinkedInError(f"LinkedIn rejected the post: {message[:200]}")
+        return str(response.headers.get("X-RestLi-Id") or "published")
+
+    def disconnect(self) -> None:
+        self.store.clear()
+
+    def _valid_token(self) -> dict[str, Any]:
+        token = self.store.load()
+        if not token:
+            raise LinkedInError("LinkedIn is not connected")
+        if int(token.get("expires_at") or 0) <= int(time.time()) + 60:
+            raise LinkedInError("LinkedIn authorization expired; reconnect LinkedIn")
+        if not str(token.get("access_token") or "").strip():
+            raise LinkedInError("LinkedIn authorization data is incomplete; reconnect LinkedIn")
+        return token
+
+    def _request_userinfo(self, access_token: str) -> dict[str, Any]:
+        try:
+            response = self.session.get(
+                USERINFO_URL,
+                headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+                timeout=self.config.timeout,
+            )
+        except requests.RequestException as exc:
+            raise LinkedInError("LinkedIn profile verification failed") from exc
+        body = self._json(response)
+        if response.status_code >= 400:
+            raise LinkedInError("LinkedIn profile verification failed")
+        return body
+
+    @staticmethod
+    def _json(response: requests.Response) -> dict[str, Any]:
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        return body if isinstance(body, dict) else {}
+

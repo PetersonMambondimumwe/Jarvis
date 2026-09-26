@@ -11,6 +11,7 @@ Install deps:  pip install fastapi "uvicorn[standard]" cryptography
 import asyncio
 import base64
 import hashlib
+import html
 import json
 import os
 import re
@@ -388,6 +389,7 @@ class DashboardServer:
         self._phone_audio_ws_clients: set[WebSocket] = set()
         self._phone_speaker_ws_clients: set[WebSocket] = set()
         self._phone_speaker_clients: dict[str, WebSocket] = {}
+        self._linkedin_oauth_states: dict[str, float] = {}
         self._uploads_dir                 = UPLOADS_DIR
         self._load_sessions()
         self._login_html                  = _read("login.html")
@@ -683,6 +685,106 @@ class DashboardServer:
                 "voice_clients": len(self._phone_audio_ws_clients) + len(self._phone_speaker_ws_clients),
                 "history": len(self._history),
             })
+
+        @app.get("/api/linkedin/status")
+        async def linkedin_status(req: Request):
+            if not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            try:
+                from core.linkedin_client import LinkedInClient, load_linkedin_config
+
+                status = LinkedInClient(load_linkedin_config()).status()
+                return JSONResponse({"ok": True, **status})
+            except Exception as exc:
+                from core.linkedin_client import LinkedInError
+
+                if isinstance(exc, LinkedInError):
+                    return JSONResponse(
+                        {"ok": False, "configured": False, "connected": False, "error": str(exc)},
+                        status_code=503,
+                    )
+                return JSONResponse(
+                    {"ok": False, "configured": False, "connected": False, "error": "LinkedIn status failed"},
+                    status_code=500,
+                )
+
+        @app.post("/api/linkedin/oauth/start")
+        async def linkedin_oauth_start(req: Request):
+            if not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            try:
+                from core.linkedin_client import LinkedInClient, load_linkedin_config
+
+                now = time.time()
+                self._linkedin_oauth_states = {
+                    key: expiry
+                    for key, expiry in self._linkedin_oauth_states.items()
+                    if expiry > now
+                }
+                state = secrets.token_urlsafe(32)
+                self._linkedin_oauth_states[state] = now + 600
+                url = LinkedInClient(load_linkedin_config()).authorization_url(state)
+                return JSONResponse({"ok": True, "authorization_url": url})
+            except Exception as exc:
+                from core.linkedin_client import LinkedInError
+
+                message = str(exc) if isinstance(exc, LinkedInError) else "LinkedIn connection could not start"
+                return JSONResponse({"ok": False, "error": message}, status_code=503)
+
+        @app.get("/auth/linkedin/callback", response_class=HTMLResponse)
+        async def linkedin_oauth_callback(
+            code: str = "",
+            state: str = "",
+            error: str = "",
+            error_description: str = "",
+        ):
+            def result_page(ok: bool, message: str) -> HTMLResponse:
+                title = "LinkedIn connected" if ok else "LinkedIn connection failed"
+                color = "#22c55e" if ok else "#f87171"
+                safe_title = html.escape(title)
+                safe_message = html.escape(message)
+                redirect = "<script>setTimeout(()=>location.replace('/?linkedin=connected'),1200)</script>" if ok else ""
+                return HTMLResponse(
+                    f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{safe_title}</title><style>
+body{{margin:0;background:#07090f;color:#dde3ed;font-family:system-ui;display:grid;place-items:center;min-height:100vh}}
+main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{color}}}p{{line-height:1.5;color:#94a3b8}}
+</style></head><body><main><h1>{safe_title}</h1><p>{safe_message}</p></main>{redirect}</body></html>""",
+                    headers={"Cache-Control": "no-store"},
+                )
+
+            now = time.time()
+            expiry = self._linkedin_oauth_states.pop(state, 0)
+            if not state or expiry <= now:
+                return result_page(False, "The authorization request expired. Return to Jarvis and try again.")
+            if error:
+                detail = error_description or error
+                return result_page(False, f"LinkedIn declined the request: {detail[:200]}")
+            try:
+                from core.linkedin_client import LinkedInClient, load_linkedin_config
+
+                token = LinkedInClient(load_linkedin_config()).exchange_code(code)
+                profile = token.get("profile") if isinstance(token.get("profile"), dict) else {}
+                name = str(profile.get("name") or "your account")
+                return result_page(True, f"Jarvis is now connected to {name}.")
+            except Exception as exc:
+                from core.linkedin_client import LinkedInError
+
+                message = str(exc) if isinstance(exc, LinkedInError) else "The authorization exchange failed."
+                return result_page(False, message)
+
+        @app.post("/api/linkedin/disconnect")
+        async def linkedin_disconnect(req: Request):
+            if not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            try:
+                from core.linkedin_client import LinkedInClient, load_linkedin_config
+
+                LinkedInClient(load_linkedin_config()).disconnect()
+                return JSONResponse({"ok": True})
+            except Exception:
+                return JSONResponse({"ok": False, "error": "LinkedIn disconnect failed"}, status_code=500)
 
         @app.post("/login")
         async def login(req: Request):

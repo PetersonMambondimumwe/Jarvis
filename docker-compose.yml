@@ -22,5 +22,9 @@ services:
       - DISPLAY=:99
       - TZ=Africa/Johannesburg
       - JARVIS_TIMEZONE=Africa/Johannesburg
+      - LINKEDIN_CLIENT_ID=${LINKEDIN_CLIENT_ID:-}
+      - LINKEDIN_CLIENT_SECRET=${LINKEDIN_CLIENT_SECRET:-}
+      - LINKEDIN_PRIMARY_CLIENT_SECTRET=${LINKEDIN_PRIMARY_CLIENT_SECTRET:-}
+      - LINKEDIN_REDIRECT_URI=${LINKEDIN_REDIRECT_URI:-https://jarvis.littleheartsacademy.online/auth/linkedin/callback}
     # IPC and shm configuration for high-throughput audio queues
     shm_size: '512m'

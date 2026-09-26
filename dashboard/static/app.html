@@ -376,6 +376,7 @@
     <div class="logo"><em>J</em>ARVIS</div>
     <div class="pill" id="pill"><span class="dot"></span><span id="st">Connecting</span></div>
     <button class="pill on" id="tts-toggle" onclick="toggleTTS()" style="cursor:pointer;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:var(--green);" title="Toggle voice output">🔊 <span id="tts-txt">VOICE ON</span></button>
+    <button class="pill" id="linkedin-btn" onclick="connectLinkedIn()" style="cursor:pointer;font-weight:800;font-size:13px;min-width:34px;justify-content:center;" title="Connect LinkedIn" aria-label="Connect LinkedIn">in</button>
     <button class="pill" id="install-btn" onclick="openInstallModal()" style="display:inline-flex;cursor:pointer;background:rgba(99,102,241,0.25);border:1.5px solid #818cf8;color:#c7d2fe;font-weight:700;box-shadow:0 0 12px rgba(99,102,241,0.4);" title="Install JARVIS App">📲 INSTALL</button>
     <div class="enc-badge" id="enc">AES-256</div>
     <div class="spacer"></div>
@@ -580,6 +581,44 @@
       }
       return res;
     }
+
+    let _linkedinConnected = false;
+    async function refreshLinkedInStatus() {
+      const btn = document.getElementById('linkedin-btn');
+      if (!btn || !_authToken) return;
+      try {
+        const res = await _authFetch('/api/linkedin/status');
+        const data = await res.json();
+        _linkedinConnected = Boolean(data.connected);
+        btn.style.background = _linkedinConnected ? 'rgba(10,102,194,0.28)' : 'rgba(148,163,184,0.08)';
+        btn.style.borderColor = _linkedinConnected ? '#0a66c2' : 'var(--border)';
+        btn.style.color = _linkedinConnected ? '#7dc4ff' : 'var(--muted)';
+        btn.title = _linkedinConnected ? `LinkedIn connected as ${data.name || 'member'}` : 'Connect LinkedIn';
+      } catch (_) {
+        _linkedinConnected = false;
+      }
+    }
+
+    async function connectLinkedIn() {
+      if (_linkedinConnected) {
+        const btn = document.getElementById('linkedin-btn');
+        toast(btn && btn.title ? btn.title : 'LinkedIn connected');
+        return;
+      }
+      try {
+        const res = await _authFetch('/api/linkedin/oauth/start', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok || !data.authorization_url) {
+          toast(data.error || 'LinkedIn connection could not start');
+          return;
+        }
+        location.href = data.authorization_url;
+      } catch (_) {
+        toast('LinkedIn connection could not start');
+      }
+    }
+
+    window.addEventListener('load', () => setTimeout(refreshLinkedInStatus, 400));
 
     // ── AES-256-CBC encryption (CryptoJS) ────────────────────────────────────
     const _AES_SALT = 'JARVIS-DASHBOARD-v1';
