@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>JARVIS Dashboard</title>
-    <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#07090f">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#050508">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="JARVIS">
@@ -16,203 +16,196 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --app-height: 100vh;
-      --bg:      #07090f;
-      --surface: rgba(255,255,255,0.04);
-      --border:  rgba(255,255,255,0.07);
-      --accent:  #6366f1;
-      --adim:    rgba(99,102,241,0.14);
-      --text:    #dde3ed;
-      --muted:   #5e6a7e;
-      --green:   #22c55e;
-      --gdim:    rgba(34,197,94,0.14);
-    }
-    html {
-      width: 100%;
-      height: 100%;
-      min-height: 100%;
-      overflow: hidden;
-      background: var(--bg);
-    }
-    body {
-      width: 100%;
-      height: var(--app-height);
-      min-height: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
+      --bg:       #050508;
+      --surface:  rgba(255,255,255,0.03);
+      --surface2: rgba(255,255,255,0.06);
+      --border:   rgba(255,255,255,0.06);
+      --accent:   #22d3ee;
+      --accent-dim: rgba(34,211,238,0.10);
+      --accent-glow: rgba(34,211,238,0.25);
+      --text:     #c8d6e5;
+      --text-hi:  #e8eef5;
+      --muted:    #4a5568;
+      --green:    #22c55e;
+      --gdim:     rgba(34,197,94,0.12);
+      --red:      #ef4444;
+      --glass:    rgba(10,12,18,0.65);
+      --glass-border: rgba(255,255,255,0.08);
     }
 
-        /* ── MOBILE RESPONSIVENESS & SAFE AREAS ── */
+    html {
+      width: 100%; height: 100%; min-height: 100%;
+      overflow: hidden; background: var(--bg);
+    }
     body {
+      width: 100%; height: var(--app-height); min-height: 0;
+      background: var(--bg); color: var(--text);
+      font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+      display: flex; flex-direction: column; overflow: hidden;
       touch-action: manipulation;
     }
 
     @supports (height: 100svh) {
-      :root {
-        --app-height: 100svh;
-      }
+      :root { --app-height: 100svh; }
     }
 
     @media (display-mode: standalone) {
-      #install-btn {
-        display: none !important;
-      }
+      #install-btn { display: none !important; }
     }
+    .is-standalone #install-btn { display: none !important; }
 
     /* ── INSTALL MODAL ── */
     .modal-backdrop {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.78); backdrop-filter: blur(8px);
+      position: fixed; inset: 0; background: rgba(0,0,0,0.82); backdrop-filter: blur(12px);
       display: none; align-items: center; justify-content: center; z-index: 1000;
-      padding: 16px; animation: pop 0.18s ease;
+      padding: 16px; animation: fadeUp 0.2s ease;
     }
     .modal-backdrop.open { display: flex; }
     .modal-card {
-      background: #0b0f19; border: 1px solid rgba(99,102,241,0.35); border-radius: 20px;
-      width: 100%; max-width: 440px; padding: 22px; box-shadow: 0 20px 50px rgba(0,0,0,0.85);
+      background: rgba(10,14,22,0.95); border: 1px solid rgba(34,211,238,0.18); border-radius: 20px;
+      width: 100%; max-width: 420px; padding: 24px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.7), 0 0 40px rgba(34,211,238,0.05);
+      backdrop-filter: blur(20px);
     }
     .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-    .modal-title { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: 0.5px; }
-    .modal-close { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; padding: 4px; line-height: 1; }
+    .modal-title { font-size: 15px; font-weight: 700; color: var(--text-hi); letter-spacing: 0.8px; }
+    .modal-close { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px; line-height: 1; }
     .modal-close:hover { color: #fff; }
-    .modal-sub { font-size: 12px; color: var(--muted); line-height: 1.5; margin-bottom: 18px; }
+    .modal-sub { font-size: 12px; color: var(--muted); line-height: 1.6; margin-bottom: 18px; }
     .install-tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
     .tab-btn {
       flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent;
       background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s;
     }
-    .tab-btn.active { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.4); color: #818cf8; }
+    .tab-btn.active { background: var(--accent-dim); border-color: rgba(34,211,238,0.25); color: var(--accent); }
     .tab-content { display: none; flex-direction: column; gap: 12px; }
     .tab-content.active { display: flex; }
     .install-step { display: flex; align-items: flex-start; gap: 12px; }
     .step-num {
-      width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff;
+      width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #000;
       font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
     }
     .step-txt { font-size: 13px; line-height: 1.5; color: var(--text); }
     .badge-icon { background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 4px; font-size: 12px; font-family: monospace; }
 
-    @media (max-width: 640px) {
-      header {
-        padding: 10px 12px;
-        padding-top: max(10px, env(safe-area-inset-top));
-        gap: 6px;
-      }
-      .logo {
-        font-size: 13px;
-        letter-spacing: 2px;
-      }
-      .url {
-        display: none !important;
-      }
-      .enc-badge {
-        display: none !important;
-      }
-      .pill {
-        padding: 5px 8px;
-        font-size: 9px;
-        letter-spacing: 1px;
-      }
-      #tts-txt {
-        display: none;
-      }
-      #tts-toggle {
-        padding: 5px 8px;
-      }
-      #install-btn {
-        display: inline-flex !important;
-        padding: 5px 9px;
-        font-size: 10px;
-        letter-spacing: 1px;
-      }
-      main {
-        padding: 12px 10px 6px;
-        gap: 8px;
-      }
-      .msg {
-        max-width: 92%;
-        font-size: 14px;
-        line-height: 1.5;
-        padding: 10px 13px;
-        border-radius: 14px;
-      }
-      footer {
-        padding: 8px max(10px, env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
-        gap: 6px;
-      }
-      #inp {
-        font-size: 16px !important;
-        padding: 10px 12px;
-        border-radius: 10px;
-      }
-      .btn {
-        padding: 10px 12px;
-        border-radius: 10px;
-        font-size: 11px;
-      }
-      #mic-btn, .btn-attach {
-        padding: 10px 12px;
-        font-size: 16px;
-        border-radius: 10px;
-      }
-    }
-
-    /* ── HEADER ── */
+    /* ── TOP BAR ── */
     header {
       flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
-      padding: max(12px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--border);
-      background: rgba(7,9,15,0.95);
+      padding: max(12px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px));
+      background: transparent; z-index: 10; position: relative;
     }
-    .logo { font-size: 15px; font-weight: 700; letter-spacing: 6px; }
+    .logo {
+      font-size: 14px; font-weight: 700; letter-spacing: 6px; text-transform: uppercase;
+      color: rgba(255,255,255,0.5);
+    }
     .logo em { color: var(--accent); font-style: normal; }
     .pill {
-      display: flex; align-items: center; gap: 6px; padding: 4px 11px;
+      display: flex; align-items: center; gap: 5px; padding: 4px 10px;
       border-radius: 99px; background: var(--surface); border: 1px solid var(--border);
-      font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+      font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
       color: var(--muted); transition: all 0.3s;
     }
-    .pill.on { background: var(--gdim); border-color: rgba(34,197,94,0.3); color: var(--green); }
-    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); transition: background 0.3s; }
+    .pill.on { background: var(--gdim); border-color: rgba(34,197,94,0.25); color: var(--green); }
+    .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); transition: background 0.3s; }
     .pill.on .dot { background: var(--green); animation: blink 2s infinite; }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.35} }
     .spacer { flex: 1; }
     .enc-badge {
-      font-size: 9px; font-weight: 700; letter-spacing: 1.5px; padding: 3px 8px;
+      font-size: 8px; font-weight: 700; letter-spacing: 1.5px; padding: 3px 7px;
       border-radius: 4px; display: none;
     }
-    .enc-badge.on  { display: block; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.25); color: var(--green); }
-    .enc-badge.off { display: block; background: rgba(255,100,100,0.08); border: 1px solid rgba(255,100,100,0.2); color: #f87171; }
-    .url { font-size: 10px; font-family: monospace; color: var(--muted); padding: 4px 9px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+    .enc-badge.on  { display: block; background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.2); color: var(--green); }
+    .enc-badge.off { display: block; background: rgba(255,100,100,0.06); border: 1px solid rgba(255,100,100,0.15); color: #f87171; }
+    .url { font-size: 9px; font-family: monospace; color: var(--muted); padding: 3px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; opacity: 0.6; }
 
-    /* ── FEED ── */
-    main { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 10px; overscroll-behavior: contain; }
-    main::-webkit-scrollbar { width: 3px; }
-    main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-    .msg { max-width: 82%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.55; animation: pop 0.18s ease; }
-    @keyframes pop { from { opacity:0; transform:translateY(4px); } }
-    .msg-j   { align-self:flex-start; background:var(--adim);   border:1px solid rgba(99,102,241,0.18); border-bottom-left-radius:4px; }
-    .msg-u   { align-self:flex-end;   background:var(--surface); border:1px solid var(--border);        border-bottom-right-radius:4px; }
-    .msg-sys { align-self:center; font-size:11px; color:var(--muted); padding:2px 0; background:transparent; border:none; letter-spacing:0.3px; }
-    .lbl { font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; opacity:0.45; margin-bottom:4px; }
-    .msg-j .lbl { color:var(--accent); }
-    .msg-u .lbl { color:var(--muted); text-align:right; }
+    /* ── VISUALIZER LAYER ── */
+    #viz-layer {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none; z-index: 1;
+    }
+    #viz-container {
+      position: relative; width: min(72vw, 360px); height: min(72vw, 360px);
+      pointer-events: auto; cursor: pointer;
+      transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    #viz-container:hover { transform: scale(1.02); }
+    #viz-canvas {
+      width: 100%; height: 100%; display: block;
+    }
+    /* Glow ring behind canvas */
+    #viz-ring {
+      position: absolute; inset: -4px; border-radius: 50%;
+      border: 1.5px solid rgba(34,211,238,0.2);
+      box-shadow: 0 0 30px rgba(34,211,238,0.08), inset 0 0 30px rgba(34,211,238,0.04);
+      animation: ringPulse 4s ease-in-out infinite;
+    }
+    @keyframes ringPulse {
+      0%, 100% { opacity: 0.6; box-shadow: 0 0 30px rgba(34,211,238,0.08), inset 0 0 30px rgba(34,211,238,0.04); }
+      50% { opacity: 1; box-shadow: 0 0 50px rgba(34,211,238,0.14), inset 0 0 40px rgba(34,211,238,0.06); }
+    }
+    /* Status text below viz */
+    #viz-status {
+      position: absolute; bottom: -32px; left: 50%; transform: translateX(-50%);
+      font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
+      color: rgba(34,211,238,0.5); font-weight: 600; white-space: nowrap;
+      pointer-events: none;
+    }
+    /* TTS button positioned near bottom-right of viz */
+    #tts-area {
+      position: absolute; bottom: -28px; right: -6px;
+      pointer-events: auto;
+    }
+
+    /* ── FEED (CHAT) ── */
+    main {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto;
+      padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 8px;
+      overscroll-behavior: contain; z-index: 5; position: relative;
+    }
+    main::-webkit-scrollbar { width: 2px; }
+    main::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 2px; }
+    .msg {
+      max-width: 80%; padding: 10px 14px; border-radius: 14px;
+      font-size: 13.5px; line-height: 1.55; animation: fadeUp 0.2s ease;
+      backdrop-filter: blur(8px);
+    }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(6px); } }
+    .msg-j {
+      align-self: flex-start;
+      background: rgba(34,211,238,0.06); border: 1px solid rgba(34,211,238,0.1);
+      border-bottom-left-radius: 4px;
+    }
+    .msg-u {
+      align-self: flex-end;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-bottom-right-radius: 4px;
+    }
+    .msg-sys {
+      align-self: center; font-size: 10px; color: var(--muted); padding: 2px 0;
+      background: transparent; border: none; letter-spacing: 0.5px;
+    }
+    .lbl {
+      font-size: 8px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase;
+      opacity: 0.4; margin-bottom: 4px;
+    }
+    .msg-j .lbl { color: var(--accent); }
+    .msg-u .lbl { color: var(--muted); text-align: right; }
 
     /* ── FILE CARD ── */
     .msg-file {
       align-self: flex-end;
-      background: var(--surface); border: 1px solid var(--border);
+      background: var(--surface2); border: 1px solid var(--border);
       border-radius: 14px; border-bottom-right-radius: 4px;
       padding: 11px 14px; display: flex; align-items: center; gap: 12px;
-      max-width: 82%; animation: pop 0.18s ease;
+      max-width: 80%; animation: fadeUp 0.2s ease; backdrop-filter: blur(8px);
     }
-    .fc-icon { font-size: 26px; flex-shrink: 0; }
+    .fc-icon { font-size: 24px; flex-shrink: 0; }
     .fc-meta { flex: 1; min-width: 0; }
-    .fc-lbl  { font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; opacity:0.45; color:var(--muted); margin-bottom:4px; }
+    .fc-lbl  { font-size: 8px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; opacity: 0.4; color: var(--muted); margin-bottom: 4px; }
     .fc-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .fc-size { font-size: 11px; color: var(--muted); margin-top: 2px; }
-    .fc-bar-wrap { height: 3px; background: var(--border); border-radius: 2px; margin-top: 7px; overflow: hidden; }
+    .fc-bar-wrap { height: 2px; background: var(--border); border-radius: 2px; margin-top: 7px; overflow: hidden; }
     .fc-bar { height: 100%; width: 0%; background: var(--accent); border-radius: 2px; transition: width 0.12s linear; }
     .fc-status { font-size: 10px; font-weight: 700; letter-spacing: 1px; flex-shrink: 0; color: var(--muted); }
     .fc-status.done { color: var(--green); }
@@ -220,107 +213,115 @@
     .fc-dl { display:block; margin-top:6px; font-size:11px; color:var(--accent); text-decoration:none; font-weight:600; }
     .fc-dl:hover { opacity: 0.8; }
 
-    /* ── FOOTER ── */
-    footer { flex:0 0 auto; padding:10px max(14px, env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px)); border-top:1px solid var(--border); background:rgba(7,9,15,0.95); display:flex; gap:8px; align-items:center; }
-    #inp { flex:1; min-width:0; padding:11px 14px; background:var(--surface); border:1.5px solid var(--border); border-radius:12px; color:var(--text); font-size:14px; outline:none; transition:border-color 0.15s; }
-    #inp:focus { border-color: var(--accent); }
-    #inp::placeholder { color: var(--muted); }
-    .btn { padding:11px 15px; border:none; border-radius:12px; font-size:11px; font-weight:700; letter-spacing:1.5px; cursor:pointer; transition:opacity 0.15s,transform 0.1s; }
-    .btn:active { transform: scale(0.96); }
-    .btn:hover  { opacity: 0.82; }
-    .btn-send { background: var(--accent); color: #fff; }
-    .btn-wake { background:var(--surface); border:1px solid var(--border); color:var(--muted); display:none; }
-    .btn-wake.show { display:block; color:var(--green); border-color:rgba(34,197,94,0.35); }
-    .btn-attach {
-      background: var(--surface); border: 1px solid var(--border); color: var(--muted);
-      padding: 11px 13px; font-size: 16px; line-height: 1; border-radius: 12px;
-      cursor: pointer; transition: opacity 0.15s, transform 0.1s; display: flex;
-      align-items: center; justify-content: center; flex-shrink: 0;
+    /* ── FOOTER / INPUT ── */
+    footer {
+      flex: 0 0 auto; z-index: 10; position: relative;
+      padding: 10px max(14px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px));
+      background: linear-gradient(to top, rgba(5,5,8,0.97) 70%, transparent);
+      display: flex; gap: 8px; align-items: center;
     }
-    .btn-attach:hover  { opacity: 0.82; border-color: var(--accent); color: var(--accent); }
-    .btn-attach:active { transform: scale(0.96); }
+    #inp {
+      flex: 1; min-width: 0; padding: 12px 16px;
+      background: var(--glass); border: 1px solid var(--glass-border);
+      border-radius: 14px; color: var(--text-hi); font-size: 14px;
+      outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+      backdrop-filter: blur(12px);
+    }
+    #inp:focus {
+      border-color: rgba(34,211,238,0.3);
+      box-shadow: 0 0 16px rgba(34,211,238,0.06);
+    }
+    #inp::placeholder { color: var(--muted); font-size: 13px; }
+    .btn {
+      padding: 12px 16px; border: none; border-radius: 14px;
+      font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
+      cursor: pointer; transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn:active { transform: scale(0.95); }
+    .btn:hover  { opacity: 0.85; }
+    .btn-send {
+      background: var(--accent); color: #050508; font-weight: 800;
+    }
+    .btn-wake {
+      background: var(--surface); border: 1px solid var(--border); color: var(--muted); display: none;
+    }
+    .btn-wake.show { display: block; color: var(--green); border-color: rgba(34,197,94,0.3); }
+    .btn-attach {
+      background: var(--glass); border: 1px solid var(--glass-border); color: var(--muted);
+      padding: 12px 14px; font-size: 15px; line-height: 1; border-radius: 14px;
+      cursor: pointer; transition: all 0.2s; display: flex;
+      align-items: center; justify-content: center; flex-shrink: 0;
+      backdrop-filter: blur(12px);
+    }
+    .btn-attach:hover  { border-color: rgba(34,211,238,0.25); color: var(--accent); }
+    .btn-attach:active { transform: scale(0.95); }
 
     /* ── MIC BUTTON ── */
     #mic-btn {
-      background: var(--surface); border: 1px solid var(--border); color: var(--muted);
-      padding: 11px 13px; font-size: 16px; line-height: 1; border-radius: 12px;
-      cursor: pointer; transition: opacity 0.15s, transform 0.1s, background 0.2s, border-color 0.2s;
+      background: var(--glass); border: 1px solid var(--glass-border); color: var(--muted);
+      padding: 12px 14px; font-size: 15px; line-height: 1; border-radius: 14px;
+      cursor: pointer; transition: all 0.2s;
       display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+      backdrop-filter: blur(12px);
     }
-    #mic-btn:hover  { opacity: 0.82; border-color: var(--accent); color: var(--accent); }
-    #mic-btn:active { transform: scale(0.96); }
+    #mic-btn:hover  { border-color: rgba(34,211,238,0.25); color: var(--accent); }
+    #mic-btn:active { transform: scale(0.95); }
     #mic-btn.recording {
-      background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.45); color: #ef4444;
+      background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.35); color: #ef4444;
       animation: mic-pulse 1s ease-in-out infinite;
     }
     #mic-btn.unsupported { opacity: 0.3; cursor: not-allowed; }
-    @keyframes mic-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.65;transform:scale(0.97)} }
+    @keyframes mic-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.6;transform:scale(0.97)} }
+
+    /* ── TTS TOGGLE ── */
+    #tts-toggle {
+      padding: 5px 10px; border-radius: 99px; border: 1px solid transparent;
+      font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+      cursor: pointer; transition: all 0.3s; display: flex; align-items: center; gap: 5px;
+      background: var(--gdim); border-color: rgba(34,197,94,0.25); color: var(--green);
+    }
 
     /* ── TOAST ── */
     #toast {
-      position:fixed; top:66px; left:50%; transform:translateX(-50%) translateY(-8px);
-      background:rgba(34,197,94,0.16); border:1px solid rgba(34,197,94,0.4);
-      color:var(--green); font-size:12px; font-weight:700; letter-spacing:1px;
-      padding:7px 18px; border-radius:99px;
-      opacity:0; transition:opacity 0.22s,transform 0.22s;
-      pointer-events:none; white-space:nowrap;
+      position: fixed; top: 60px; left: 50%; transform: translateX(-50%) translateY(-8px);
+      background: rgba(34,211,238,0.1); border: 1px solid rgba(34,211,238,0.25);
+      color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: 1px;
+      padding: 7px 18px; border-radius: 99px;
+      opacity: 0; transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none; white-space: nowrap; z-index: 100;
+      backdrop-filter: blur(12px);
     }
-    #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+    /* ── MOBILE RESPONSIVE ── */
     @media (max-width: 640px) {
       header {
-        padding: max(10px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 10px max(12px, env(safe-area-inset-left, 0px));
+        padding: max(8px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) 8px max(10px, env(safe-area-inset-left, 0px));
         gap: 6px;
       }
-      .logo {
-        font-size: 13px;
-        letter-spacing: 2px;
-      }
-      .pill {
-        padding: 5px 8px;
-        font-size: 9px;
-        letter-spacing: 1px;
-      }
-      #install-btn {
-        padding: 5px 9px;
-        font-size: 10px;
-        letter-spacing: 1px;
-      }
-      main {
-        padding: 12px 10px 6px;
-        gap: 8px;
-      }
+      .logo { font-size: 12px; letter-spacing: 3px; }
+      .url { display: none !important; }
+      .enc-badge { display: none !important; }
+      .pill { padding: 4px 7px; font-size: 8px; letter-spacing: 1px; }
+      #tts-txt { display: none; }
+      #tts-toggle { padding: 4px 8px; }
+      #install-btn { padding: 4px 8px; font-size: 9px; letter-spacing: 1px; }
+      #viz-container { width: min(65vw, 280px); height: min(65vw, 280px); }
+      main { padding: 10px 10px 6px; gap: 6px; }
+      .msg { max-width: 90%; font-size: 13px; line-height: 1.5; padding: 9px 12px; border-radius: 12px; }
       footer {
-        width: 100%;
         padding: 8px max(10px, env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
         gap: 6px;
       }
-      #inp {
-        font-size: 16px !important;
-        padding: 10px 12px;
-        border-radius: 10px;
-      }
-      .btn {
-        padding: 10px 12px;
-        border-radius: 10px;
-        font-size: 11px;
-      }
-      #mic-btn,
-      .btn-attach {
-        padding: 10px 12px;
-        font-size: 16px;
-        border-radius: 10px;
-      }
+      #inp { font-size: 16px !important; padding: 10px 12px; border-radius: 12px; }
+      .btn { padding: 10px 12px; border-radius: 12px; font-size: 11px; }
+      #mic-btn, .btn-attach { padding: 10px 12px; font-size: 15px; border-radius: 12px; }
     }
 
-    @media (display-mode: standalone) {
-      #install-btn {
-        display: none !important;
-      }
-    }
-    .is-standalone #install-btn {
-      display: none !important;
-    }
+    /* ── When chat has messages, fade the visualizer ── */
+    main:not(:empty) ~ #viz-layer { opacity: 0.15; transition: opacity 0.8s; }
+    /* ── When chat is empty, show visualizer prominently ── */
+    main:empty ~ #viz-layer { opacity: 1; transition: opacity 0.8s; }
   </style>
 </head>
 <body>
@@ -333,7 +334,7 @@
         <div class="modal-title">📲 Install JARVIS App</div>
         <button class="modal-close" onclick="closeInstallModal()">✕</button>
       </div>
-      <p class="modal-sub">Install JARVIS on your phone for a full-screen standalone HUD, direct mic access, and zero address bar clutter.</p>
+      <p class="modal-sub">Install JARVIS on your device for a full-screen standalone experience with direct mic access.</p>
 
       <div class="install-tabs">
         <button id="tab-btn-ios" class="tab-btn active" onclick="showInstallTab('ios')">🍎 iPhone / iPad</button>
@@ -372,19 +373,33 @@
       </div>
     </div>
   </div>
+
   <header>
     <div class="logo"><em>J</em>ARVIS</div>
     <div class="pill" id="pill"><span class="dot"></span><span id="st">Connecting</span></div>
-    <button class="pill on" id="tts-toggle" onclick="toggleTTS()" style="cursor:pointer;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:var(--green);" title="Toggle voice output">🔊 <span id="tts-txt">VOICE ON</span></button>
-    <button class="pill" id="linkedin-btn" onclick="connectLinkedIn()" style="cursor:pointer;font-weight:800;font-size:13px;min-width:34px;justify-content:center;" title="Connect LinkedIn" aria-label="Connect LinkedIn">in</button>
-    <button class="pill" id="install-btn" onclick="openInstallModal()" style="display:inline-flex;cursor:pointer;background:rgba(99,102,241,0.25);border:1.5px solid #818cf8;color:#c7d2fe;font-weight:700;box-shadow:0 0 12px rgba(99,102,241,0.4);" title="Install JARVIS App">📲 INSTALL</button>
+    <button class="pill" id="linkedin-btn" onclick="connectLinkedIn()" style="cursor:pointer;font-weight:800;font-size:12px;min-width:30px;justify-content:center;" title="Connect LinkedIn" aria-label="Connect LinkedIn">in</button>
+    <button class="pill" id="install-btn" onclick="openInstallModal()" style="display:inline-flex;cursor:pointer;background:rgba(34,211,238,0.12);border:1px solid rgba(34,211,238,0.3);color:var(--accent);font-weight:700;" title="Install JARVIS App">📲 INSTALL</button>
     <div class="enc-badge" id="enc">AES-256</div>
     <div class="spacer"></div>
     <div class="url">__IP__:__PORT__</div>
   </header>
+
   <main id="feed"></main>
+
+  <!-- HOLOGRAPHIC VISUALIZER -->
+  <div id="viz-layer">
+    <div id="viz-container">
+      <div id="viz-ring"></div>
+      <canvas id="viz-canvas"></canvas>
+      <div id="viz-status">Awaiting input</div>
+      <div id="tts-area">
+        <button id="tts-toggle" onclick="toggleTTS()" title="Toggle voice output">🔊 <span id="tts-txt">VOICE ON</span></button>
+      </div>
+    </div>
+  </div>
+
   <footer>
-    <input id="inp" placeholder="Send a command to JARVIS…" autocomplete="off">
+    <input id="inp" placeholder="Ask JARVIS…" autocomplete="off">
     <label class="btn-attach" for="file-inp" title="Send file">📎</label>
     <input type="file" id="file-inp" multiple accept="*/*" style="display:none">
     <button id="mic-btn" onclick="doMic()" title="Voice command">🎤</button>
@@ -393,6 +408,164 @@
   </footer>
 
   <script>
+    /* ═══════════════════════════════════════════════════════════════════════
+       PARTICLE VISUALIZER — holographic sphere with ambient motion
+       ═══════════════════════════════════════════════════════════════════════ */
+    (function initVisualizer() {
+      const canvas = document.getElementById('viz-canvas');
+      const ctx2d = canvas.getContext('2d');
+      const vizStatus = document.getElementById('viz-status');
+      let W, H, cx, cy, radius;
+      let particles = [];
+      let _vizFrame;
+      let _vizActive = true;
+
+      const PARTICLE_COUNT = 120;
+      const ORBIT_PARTICLES = 40;
+
+      function resize() {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        W = rect.width * dpr;
+        H = rect.height * dpr;
+        canvas.width = W;
+        canvas.height = H;
+        cx = W / 2;
+        cy = H / 2;
+        radius = Math.min(W, H) * 0.42;
+      }
+
+      function createParticles() {
+        particles = [];
+        // Inner sphere particles
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.acos(2 * Math.random() - 1);
+          const r = Math.random() * 0.85;
+          particles.push({
+            type: 'sphere',
+            theta, phi, r,
+            speed: 0.0005 + Math.random() * 0.001,
+            drift: (Math.random() - 0.5) * 0.0003,
+            size: 1 + Math.random() * 2.5,
+            alpha: 0.3 + Math.random() * 0.5,
+            pulse: Math.random() * Math.PI * 2,
+            pulseSpeed: 0.01 + Math.random() * 0.015,
+          });
+        }
+        // Orbit ring particles
+        for (let i = 0; i < ORBIT_PARTICLES; i++) {
+          const angle = (i / ORBIT_PARTICLES) * Math.PI * 2;
+          particles.push({
+            type: 'orbit',
+            angle,
+            speed: 0.003 + Math.random() * 0.004,
+            size: 0.8 + Math.random() * 1.2,
+            alpha: 0.15 + Math.random() * 0.25,
+            orbitR: 0.92 + Math.random() * 0.06,
+            wobble: Math.random() * Math.PI * 2,
+            wobbleSpeed: 0.005 + Math.random() * 0.01,
+            wobbleAmp: 0.01 + Math.random() * 0.02,
+          });
+        }
+      }
+
+      function draw(time) {
+        if (!_vizActive) return;
+        ctx2d.clearRect(0, 0, W, H);
+
+        // Subtle radial gradient background glow
+        const grad = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, radius * 1.1);
+        grad.addColorStop(0, 'rgba(34, 211, 238, 0.03)');
+        grad.addColorStop(0.5, 'rgba(34, 211, 238, 0.01)');
+        grad.addColorStop(1, 'transparent');
+        ctx2d.fillStyle = grad;
+        ctx2d.beginPath();
+        ctx2d.arc(cx, cy, radius * 1.1, 0, Math.PI * 2);
+        ctx2d.fill();
+
+        for (const p of particles) {
+          if (p.type === 'sphere') {
+            p.theta += p.speed;
+            p.phi += p.drift;
+            p.pulse += p.pulseSpeed;
+
+            const sinPhi = Math.sin(p.phi);
+            const cosPhi = Math.cos(p.phi);
+            const x3d = p.r * sinPhi * Math.cos(p.theta);
+            const y3d = p.r * sinPhi * Math.sin(p.theta);
+            const z3d = p.r * cosPhi;
+
+            // Simple perspective
+            const scale = 1 / (1.8 - z3d * 0.4);
+            const px = cx + x3d * radius * scale;
+            const py = cy + y3d * radius * scale;
+            const depth = (z3d + 1) / 2; // 0 to 1
+            const a = p.alpha * (0.3 + depth * 0.7) * (0.7 + 0.3 * Math.sin(p.pulse));
+            const s = p.size * scale * (0.8 + 0.2 * Math.sin(p.pulse));
+
+            ctx2d.beginPath();
+            ctx2d.arc(px, py, s, 0, Math.PI * 2);
+            ctx2d.fillStyle = `rgba(34, 211, 238, ${a})`;
+            ctx2d.fill();
+
+            // Glow for brighter particles
+            if (a > 0.35) {
+              ctx2d.beginPath();
+              ctx2d.arc(px, py, s * 3, 0, Math.PI * 2);
+              ctx2d.fillStyle = `rgba(34, 211, 238, ${a * 0.08})`;
+              ctx2d.fill();
+            }
+          } else if (p.type === 'orbit') {
+            p.angle += p.speed;
+            p.wobble += p.wobbleSpeed;
+            const oR = radius * (p.orbitR + Math.sin(p.wobble) * p.wobbleAmp);
+            const px = cx + Math.cos(p.angle) * oR;
+            const py = cy + Math.sin(p.angle) * oR;
+
+            ctx2d.beginPath();
+            ctx2d.arc(px, py, p.size, 0, Math.PI * 2);
+            ctx2d.fillStyle = `rgba(34, 211, 238, ${p.alpha * (0.6 + 0.4 * Math.sin(p.wobble))})`;
+            ctx2d.fill();
+          }
+        }
+
+        _vizFrame = requestAnimationFrame(draw);
+      }
+
+      // Expose for status sync
+      window._vizSetStatus = function(text) {
+        if (vizStatus) vizStatus.textContent = text;
+      };
+
+      resize();
+      createParticles();
+      _vizFrame = requestAnimationFrame(draw);
+      window.addEventListener('resize', () => { resize(); createParticles(); });
+
+      // Pause animation when tab hidden for battery
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          _vizActive = true;
+          _vizFrame = requestAnimationFrame(draw);
+        } else {
+          _vizActive = false;
+          cancelAnimationFrame(_vizFrame);
+        }
+      });
+
+      // Fade viz when feed has messages
+      const feed = document.getElementById('feed');
+      const vizLayer = document.getElementById('viz-layer');
+      const mo = new MutationObserver(() => {
+        vizLayer.style.opacity = feed.children.length > 0 ? '0.12' : '1';
+      });
+      mo.observe(feed, { childList: true });
+    })();
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       VIEWPORT / INSTALL / STANDALONE HANDLING
+       ═══════════════════════════════════════════════════════════════════════ */
     function _isStandaloneDisplay() {
       return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
     }
@@ -678,7 +851,7 @@
         setStatus('starting');
         _connectSpeaker();
         sys('Connected to JARVIS.');
-        toast('Connected to dashboard');
+        toast('Connected');
       };
 
       _ws.onclose = async (e) => {
@@ -740,21 +913,21 @@
       const btn = document.getElementById('tts-toggle');
       const txt = document.getElementById('tts-txt');
       if (_ttsEnabled) {
-        btn.style.background = 'rgba(34,197,94,0.1)';
-        btn.style.borderColor = 'rgba(34,197,94,0.3)';
+        btn.style.background = 'rgba(34,197,94,0.12)';
+        btn.style.borderColor = 'rgba(34,197,94,0.25)';
         btn.style.color = 'var(--green)';
         txt.textContent = 'VOICE ON';
         _ensureAudioCtx();
         _connectSpeaker();
-        toast('Voice output active');
+        toast('Voice active');
       } else {
         btn.style.background = 'var(--surface)';
         btn.style.borderColor = 'var(--border)';
         btn.style.color = 'var(--muted)';
-        txt.textContent = 'VOICE MUTED';
+        txt.textContent = 'MUTED';
         _closeSpeaker();
         if (window.speechSynthesis) window.speechSynthesis.cancel();
-        toast('Voice output muted');
+        toast('Voice muted');
       }
     }
 
@@ -762,16 +935,22 @@
     const _renderedMessageIds = new Set();
 
     function setStatus(s) {
+      const vizLabel = window._vizSetStatus;
       if (s === 'active') {
         pill.className = 'pill on'; stTxt.textContent = 'Active'; wake.classList.remove('show');
+        if (vizLabel) vizLabel('Active');
       } else if (s === 'starting') {
         pill.className = 'pill'; stTxt.textContent = 'Starting'; wake.classList.remove('show');
+        if (vizLabel) vizLabel('Initializing');
       } else if (s === 'offline') {
         pill.className = 'pill'; stTxt.textContent = 'Offline'; wake.classList.add('show');
+        if (vizLabel) vizLabel('Offline');
       } else if (s === 'error') {
         pill.className = 'pill'; stTxt.textContent = 'Error'; wake.classList.add('show');
+        if (vizLabel) vizLabel('Error');
       } else {
         pill.className = 'pill'; stTxt.textContent = 'Sleeping'; wake.classList.add('show');
+        if (vizLabel) vizLabel('Sleeping');
       }
     }
 
@@ -850,7 +1029,6 @@
     function _uploadFile(file) {
       const id = 'fc_' + Date.now() + '_' + Math.random().toString(36).slice(2);
 
-      // Create file card in feed
       const card = document.createElement('div');
       card.className = 'msg-file';
       card.id = id;
@@ -916,7 +1094,6 @@
       xhr.send(fd);
     }
 
-    // File received by another WebSocket client (e.g., second open tab)
     function _onFileReceived(m) {
       const dlUrl = `/uploads/${encodeURIComponent(m.name)}?token=${encodeURIComponent(_authToken)}`;
       const card  = document.createElement('div');
@@ -933,13 +1110,12 @@
       `;
       feed.appendChild(card);
       feed.scrollTop = feed.scrollHeight;
-      toast('File received on computer!');
+      toast('File received!');
     }
 
-    // File input change handler
     document.getElementById('file-inp').addEventListener('change', function () {
       Array.from(this.files).forEach(_uploadFile);
-      this.value = ''; // reset so the same file can be re-sent
+      this.value = '';
     });
 
     // ── Commands ──────────────────────────────────────────────────────────────
@@ -1018,7 +1194,7 @@
       micBtn.classList.remove('recording');
     }
 
-    const VOICE_SEND_SAMPLES = 1600; // 100 ms at 16 kHz keeps mobile WebSocket traffic steady.
+    const VOICE_SEND_SAMPLES = 1600;
     const MAX_VOICE_WS_BUFFER = 256 * 1024;
     const JITTER_BUFFER_SECONDS = 0.08;
     const MAX_PLAYBACK_AHEAD_SECONDS = 2.0;
@@ -1082,18 +1258,18 @@
     }
 
     function _showVoiceSetup() {
-      if (document.getElementById('voice-setup')) return; // show once
+      if (document.getElementById('voice-setup')) return;
       const origin = location.origin;
       const card = document.createElement('div');
       card.id = 'voice-setup';
       card.style.cssText = [
-        'align-self:stretch', 'background:rgba(99,102,241,0.07)',
-        'border:1px solid rgba(99,102,241,0.22)', 'border-radius:14px',
+        'align-self:stretch', 'background:rgba(34,211,238,0.05)',
+        'border:1px solid rgba(34,211,238,0.15)', 'border-radius:14px',
         'padding:16px 18px', 'font-size:13px', 'line-height:1.8',
-        'animation:pop 0.18s ease'
+        'animation:fadeUp 0.2s ease'
       ].join(';');
       card.innerHTML =
-        '<div style="font-weight:700;color:#818cf8;letter-spacing:.5px;margin-bottom:10px">🎤 One-time voice setup</div>' +
+        '<div style="font-weight:700;color:var(--accent);letter-spacing:.5px;margin-bottom:10px">🎤 One-time voice setup</div>' +
         '<ol style="padding-left:18px;color:#8899aa;margin:0;display:flex;flex-direction:column;gap:4px">' +
         '<li>Open a new tab → go to <span style="background:rgba(255,255,255,0.07);padding:1px 6px;border-radius:4px;font-family:monospace;font-size:12px">chrome://flags</span></li>' +
         '<li>Search: <strong style="color:#dde3ed">Insecure origins treated as secure</strong></li>' +
@@ -1103,7 +1279,6 @@
         '</ol>';
       feed.appendChild(card);
       feed.scrollTop = feed.scrollHeight;
-      // tap to copy
       card.querySelector('#flags-url').addEventListener('click', () => {
         navigator.clipboard?.writeText(origin).then(() => toast('URL copied!')).catch(() => {});
       });
@@ -1248,7 +1423,6 @@
     async function doMic() {
       if (_voiceWs) { _stopVoice(); return; }
 
-      // Synchronously unlock AudioContext on direct user tap
       const ctx = _ensureAudioCtx();
       if (ctx.state === 'suspended') {
         try { await ctx.resume(); } catch (_) {}
@@ -1288,7 +1462,6 @@
         const rate = ctx.sampleRate;
         const src  = ctx.createMediaStreamSource(stream);
 
-        // AudioWorklet (modern) — runs in dedicated audio thread
         const wCode = `
           class J extends AudioWorkletProcessor {
             constructor() {
@@ -1341,7 +1514,6 @@
           nd.connect(_ensureSilentSink(ctx));
           _audioNd = nd;
         } catch (_) {
-          // ScriptProcessor fallback
           const sp = ctx.createScriptProcessor(4096, 1, 1);
           let _pbuf = [], _plen = 0;
           sp.onaudioprocess = e => {

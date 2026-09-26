@@ -1,5 +1,5 @@
 // JARVIS PWA Service Worker
-const CACHE_NAME = 'jarvis-pwa-v8';
+const CACHE_NAME = 'jarvis-pwa-v9';
 const ASSETS = [
   '/',
   '/login',
