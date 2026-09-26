@@ -81,6 +81,21 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertTrue(update_res.json().get("ok"))
         self.assertIn("hermes_api_base", update_res.json().get("updated", []))
 
+    def test_oauth_state_generation_and_verification(self):
+        state = self.server._generate_oauth_state()
+        self.assertTrue(bool(state))
+        self.assertIn(":", state)
+
+        # Valid state verifies and consumes
+        self.assertTrue(self.server._verify_and_consume_oauth_state(state))
+
+        # Re-consuming the same state fails (replay protection)
+        self.assertFalse(self.server._verify_and_consume_oauth_state(state))
+
+        # Tampered state fails
+        tampered = state[:-4] + "ffff"
+        self.assertFalse(self.server._verify_and_consume_oauth_state(tampered))
+
 
 if __name__ == "__main__":
     unittest.main()

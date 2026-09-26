@@ -11,6 +11,7 @@ Install deps:  pip install fastapi "uvicorn[standard]" cryptography
 import asyncio
 import base64
 import hashlib
+import hmac
 import html
 import json
 import os
@@ -74,6 +75,12 @@ _KEY_CHARS = [c for c in (string.ascii_uppercase + string.digits)
 
 # ── AES-256-CBC ───────────────────────────────────────────────────────────────
 _AES_SALT = b'JARVIS-DASHBOARD-v1'
+_OAUTH_STATE_FILE = BASE_DIR / "memory" / "oauth_states.json"
+
+
+def _oauth_signing_key() -> bytes:
+    master_pin = os.environ.get("JARVIS_PIN", "JARVIS").upper()
+    return hashlib.sha256(f"{master_pin}:linkedin-oauth-state".encode("utf-8") + _AES_SALT).digest()
 
 
 def _derive_key(session_key: str) -> bytes:
@@ -390,6 +397,7 @@ class DashboardServer:
         self._phone_speaker_ws_clients: set[WebSocket] = set()
         self._phone_speaker_clients: dict[str, WebSocket] = {}
         self._linkedin_oauth_states: dict[str, float] = {}
+        self._consumed_oauth_states: set[str] = set()
         self._uploads_dir                 = UPLOADS_DIR
         self._load_sessions()
         self._login_html                  = _read("login.html")
@@ -588,6 +596,75 @@ class DashboardServer:
             except asyncio.QueueEmpty:
                 return dropped
 
+    def _save_oauth_states(self) -> None:
+        try:
+            _OAUTH_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _OAUTH_STATE_FILE.write_text(json.dumps(self._linkedin_oauth_states), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _load_oauth_states(self) -> None:
+        try:
+            if _OAUTH_STATE_FILE.exists():
+                data = json.loads(_OAUTH_STATE_FILE.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    now = time.time()
+                    for k, v in data.items():
+                        if isinstance(v, (int, float)) and v > now:
+                            self._linkedin_oauth_states[k] = float(v)
+        except Exception:
+            pass
+
+    def _generate_oauth_state(self) -> str:
+        now = int(time.time())
+        expiry = now + 1800  # 30-minute validity
+        nonce = secrets.token_hex(16)
+        payload = f"{nonce}:{expiry}"
+        sig = hmac.new(_oauth_signing_key(), payload.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+        state = f"{payload}:{sig}"
+        self._linkedin_oauth_states[state] = float(expiry)
+        self._save_oauth_states()
+        return state
+
+    def _verify_and_consume_oauth_state(self, state: str) -> bool:
+        if not state:
+            return False
+        if not hasattr(self, "_consumed_oauth_states"):
+            self._consumed_oauth_states = set()
+        if state in self._consumed_oauth_states:
+            return False
+
+        now = time.time()
+        self._load_oauth_states()
+
+        # 1. In-memory / persisted state lookup
+        expiry = self._linkedin_oauth_states.pop(state, 0)
+        if expiry > now:
+            self._consumed_oauth_states.add(state)
+            self._save_oauth_states()
+            return True
+
+        # 2. Cryptographic HMAC token verification (resilient across process restarts)
+        parts = state.split(":")
+        if len(parts) == 3:
+            nonce, exp_str, sig = parts
+            try:
+                exp_val = int(exp_str)
+                if exp_val > now:
+                    expected_sig = hmac.new(
+                        _oauth_signing_key(),
+                        f"{nonce}:{exp_val}".encode("utf-8"),
+                        hashlib.sha256,
+                    ).hexdigest()[:32]
+                    if hmac.compare_digest(sig, expected_sig):
+                        self._consumed_oauth_states.add(state)
+                        self._save_oauth_states()
+                        return True
+            except (ValueError, TypeError):
+                pass
+
+        return False
+
 
     # ── FastAPI app ───────────────────────────────────────────────────────
 
@@ -716,14 +793,7 @@ class DashboardServer:
             try:
                 from core.linkedin_client import LinkedInClient, load_linkedin_config
 
-                now = time.time()
-                self._linkedin_oauth_states = {
-                    key: expiry
-                    for key, expiry in self._linkedin_oauth_states.items()
-                    if expiry > now
-                }
-                state = secrets.token_urlsafe(32)
-                self._linkedin_oauth_states[state] = now + 600
+                state = self._generate_oauth_state()
                 url = LinkedInClient(load_linkedin_config()).authorization_url(state)
                 return JSONResponse({"ok": True, "authorization_url": url})
             except Exception as exc:
@@ -744,6 +814,11 @@ class DashboardServer:
                 color = "#22c55e" if ok else "#f87171"
                 safe_title = html.escape(title)
                 safe_message = html.escape(message)
+                action_btn = (
+                    "<p><a href='/' style='display:inline-block;margin-top:16px;padding:8px 20px;background:rgba(34,211,238,0.15);border:1px solid rgba(34,211,238,0.4);color:#22d3ee;text-decoration:none;border-radius:20px;font-weight:600;'>Return to Jarvis</a></p>"
+                    if not ok
+                    else ""
+                )
                 redirect = "<script>setTimeout(()=>location.replace('/?linkedin=connected'),1200)</script>" if ok else ""
                 return HTMLResponse(
                     f"""<!doctype html><html><head><meta charset="utf-8">
@@ -751,14 +826,12 @@ class DashboardServer:
 <title>{safe_title}</title><style>
 body{{margin:0;background:#07090f;color:#dde3ed;font-family:system-ui;display:grid;place-items:center;min-height:100vh}}
 main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{color}}}p{{line-height:1.5;color:#94a3b8}}
-</style></head><body><main><h1>{safe_title}</h1><p>{safe_message}</p></main>{redirect}</body></html>""",
+</style></head><body><main><h1>{safe_title}</h1><p>{safe_message}</p>{action_btn}</main>{redirect}</body></html>""",
                     headers={"Cache-Control": "no-store"},
                 )
 
-            now = time.time()
-            expiry = self._linkedin_oauth_states.pop(state, 0)
-            if not state or expiry <= now:
-                return result_page(False, "The authorization request expired. Return to Jarvis and try again.")
+            if not self._verify_and_consume_oauth_state(state):
+                return result_page(False, "The authorization request expired or was invalid. Return to Jarvis and try again.")
             if error:
                 detail = error_description or error
                 return result_page(False, f"LinkedIn declined the request: {detail[:200]}")
