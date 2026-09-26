@@ -686,7 +686,14 @@
           connectWS();
         }
         _connectSpeaker();
+      } else {
+        _closeSpeaker();
+        _stopVoice();
       }
+    });
+    window.addEventListener('pagehide', () => {
+      _closeSpeaker();
+      _stopVoice();
     });
     let _ttsEnabled = true;
     function toggleTTS() {
@@ -927,6 +934,7 @@
     let _speakerWs = null;
     let _speakerReconnectTimer = null;
     let _speakerReconnectAttempts = 0;
+    let _speakerClientId = '';
     let _audioCtx = null;
     let _micStm   = null;
     let _audioNd  = null;
@@ -944,6 +952,18 @@
     const JITTER_BUFFER_SECONDS = 0.08;
     const MAX_PLAYBACK_AHEAD_SECONDS = 2.0;
     let _activeAudioSources = [];
+
+    try {
+      _speakerClientId = localStorage.getItem('jarvis_speaker_client_id') || '';
+      if (!_speakerClientId) {
+        _speakerClientId = crypto.randomUUID
+          ? crypto.randomUUID()
+          : `pwa-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        localStorage.setItem('jarvis_speaker_client_id', _speakerClientId);
+      }
+    } catch (_) {
+      _speakerClientId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
 
     function _stopAllAudio() {
       _playTime = 0;
@@ -1104,15 +1124,24 @@
       _stopAllAudio();
     }
 
+    function _speakerDesired() {
+      return Boolean(
+        _ttsEnabled &&
+        _authToken &&
+        document.visibilityState === 'visible'
+      );
+    }
+
     function _connectSpeaker() {
-      if (!_ttsEnabled || !_authToken) return;
+      if (!_speakerDesired()) return;
       if (_speakerWs && (_speakerWs.readyState === WebSocket.OPEN || _speakerWs.readyState === WebSocket.CONNECTING)) {
         return;
       }
       clearTimeout(_speakerReconnectTimer);
       const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(
-        `${wsProto}://${location.host}/ws/phone-speaker?token=${encodeURIComponent(_authToken)}`
+        `${wsProto}://${location.host}/ws/phone-speaker?token=${encodeURIComponent(_authToken)}` +
+        `&client_id=${encodeURIComponent(_speakerClientId)}`
       );
       ws.binaryType = 'arraybuffer';
       ws.onopen = () => {
@@ -1122,8 +1151,9 @@
         _playJarvisAudio(e.data);
       };
       ws.onclose = async (e) => {
-        if (_speakerWs === ws) _speakerWs = null;
-        if (!_ttsEnabled) return;
+        const wasCurrent = _speakerWs === ws;
+        if (wasCurrent) _speakerWs = null;
+        if (!wasCurrent || e.code === 4002 || !_speakerDesired()) return;
         if (e.code === 4001) {
           const renewed = await _renewAuth();
           if (!renewed) return;
@@ -1260,11 +1290,6 @@
         micBtn.classList.add('recording');
         sys('Voice live — speak now');
         toast('🎤 Live');
-      };
-
-      // Playback audio returned from Jarvis (24 kHz PCM from Gemini Live)
-      ws.onmessage = async (e) => {
-        _playJarvisAudio(e.data);
       };
 
       ws.onclose = () => { _stopVoice(); };

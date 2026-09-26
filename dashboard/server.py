@@ -386,6 +386,7 @@ class DashboardServer:
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=500)
         self._phone_audio_ws_clients: set[WebSocket] = set()
         self._phone_speaker_ws_clients: set[WebSocket] = set()
+        self._phone_speaker_clients: dict[str, WebSocket] = {}
         self._uploads_dir                 = UPLOADS_DIR
         self._load_sessions()
         self._login_html                  = _read("login.html")
@@ -490,7 +491,8 @@ class DashboardServer:
             except Exception:
                 dead.add(ws)
         self._phone_audio_ws_clients -= dead
-        self._phone_speaker_ws_clients -= dead
+        for ws in dead:
+            self._discard_phone_speaker(ws)
 
     async def broadcast_audio_control(self, action: str) -> None:
         """Send audio control messages (e.g. clear/stop) to connected speaker websockets."""
@@ -503,7 +505,18 @@ class DashboardServer:
             except Exception:
                 dead.add(ws)
         self._phone_audio_ws_clients -= dead
-        self._phone_speaker_ws_clients -= dead
+        for ws in dead:
+            self._discard_phone_speaker(ws)
+
+    def _discard_phone_speaker(self, websocket: WebSocket) -> None:
+        self._phone_speaker_ws_clients.discard(websocket)
+        stale_ids = [
+            client_id
+            for client_id, client in self._phone_speaker_clients.items()
+            if client is websocket
+        ]
+        for client_id in stale_ids:
+            self._phone_speaker_clients.pop(client_id, None)
 
     def clear_phone_audio_queue(self) -> int:
         """Drop stale microphone frames after a phone reconnects or disconnects."""
@@ -767,12 +780,30 @@ class DashboardServer:
             return bool(tok and tok in self._tokens)
 
         @app.websocket("/ws/phone-speaker")
-        async def phone_speaker_ws(websocket: WebSocket, token: str = ""):
+        async def phone_speaker_ws(
+            websocket: WebSocket,
+            token: str = "",
+            client_id: str = "",
+        ):
             tok = token.strip()
             if not _authorize_ws_token(tok):
                 await websocket.close(code=4001)
                 return
+
+            speaker_id = re.sub(r"[^A-Za-z0-9._:-]", "", client_id.strip())[:128]
+            if not speaker_id:
+                speaker_id = f"token:{tok}"
+
             await websocket.accept()
+            previous = self._phone_speaker_clients.get(speaker_id)
+            if previous is not None and previous is not websocket:
+                self._phone_speaker_ws_clients.discard(previous)
+                try:
+                    await previous.close(code=4002)
+                except Exception:
+                    pass
+
+            self._phone_speaker_clients[speaker_id] = websocket
             self._phone_speaker_ws_clients.add(websocket)
             try:
                 while True:
@@ -780,7 +811,7 @@ class DashboardServer:
             except WebSocketDisconnect:
                 pass
             finally:
-                self._phone_speaker_ws_clients.discard(websocket)
+                self._discard_phone_speaker(websocket)
 
         @app.websocket("/ws/phone-audio")
         async def phone_audio_ws(websocket: WebSocket, token: str = "", playback: str = "1"):
