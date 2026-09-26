@@ -23,6 +23,8 @@ services:
       GITHUB_PAT: ${GITHUB_PAT:-${GITHUB_TOKEN:-}}
       VERCEL_TOKEN: ${VERCEL_TOKEN:-}
       VERCEL_API_TOKEN: ${VERCEL_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-${CLAUDE_API_KEY:-}}
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-${ANTHROPIC_API_KEY:-}}
     expose:
       - "8642"
     volumes:

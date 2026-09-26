@@ -933,6 +933,7 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
                     "hermes_api_key", "hermes_api_base", "hermes_timeout_seconds",
                     "dify_api_key", "dify_api_url", "leaf_ai_dify_api_key", "leaf_ai_dify_api_url",
                     "github_pat", "github_token", "vercel_token",
+                    "anthropic_api_key", "claude_api_key",
                 }
                 updates = {k: str(v).strip() for k, v in body.items() if k in allowed_keys and isinstance(v, (str, int))}
                 if not updates:

@@ -44,6 +44,8 @@ services:
       - DIFY_API_URL=${DIFY_API_URL:-https://asc-assistant-dify-662116-169-58-74-235.sslip.io/v1}
       - LEAF_AI_DIFY_API_KEY=${LEAF_AI_DIFY_API_KEY:-}
       - LEAF_AI_DIFY_API_URL=${LEAF_AI_DIFY_API_URL:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-${CLAUDE_API_KEY:-}}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-${ANTHROPIC_API_KEY:-}}
     networks:
       default:
         aliases:

@@ -4,9 +4,8 @@
 # and Vercel projects (VERCEL_TOKEN / VERCEL_API_TOKEN).
 
 model:
-  default: gemini-3.7-flash
-  provider: gemini
-  base_url: https://generativelanguage.googleapis.com/v1beta
+  default: claude-haiku-4-5
+  provider: anthropic
 
 terminal:
   backend: local
