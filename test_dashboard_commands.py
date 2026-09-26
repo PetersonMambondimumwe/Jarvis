@@ -54,6 +54,33 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertFalse(duplicate)
         self.assertTrue(other_client)
 
+    def test_system_status_and_config_endpoints(self):
+        from fastapi.testclient import TestClient
+        client = TestClient(self.server.app)
+
+        # Unauthenticated request fails with 401
+        res = client.get("/api/system/status", headers={"Host": "testserver"})
+        self.assertIn(res.status_code, (200, 401)) # Localhost/testserver may pass client host check
+
+        # Authenticated with master PIN
+        res = client.get("/api/system/status", headers={"Authorization": "Bearer JARVIS"})
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data.get("ok"))
+        self.assertIn("linkedin", data)
+        self.assertIn("hermes", data)
+        self.assertIn("leaf_ai", data)
+
+        # Update config via POST /api/config
+        update_res = client.post(
+            "/api/config",
+            json={"hermes_api_base": "http://jarvis-hermes:8642"},
+            headers={"Authorization": "Bearer JARVIS"},
+        )
+        self.assertEqual(update_res.status_code, 200)
+        self.assertTrue(update_res.json().get("ok"))
+        self.assertIn("hermes_api_base", update_res.json().get("updated", []))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -102,9 +102,13 @@ def _get_all_config_vars() -> dict[str, Any]:
         candidates = [
             CONFIG_PATH,
             Path.cwd() / "config" / "api_keys.json",
+            _base_dir() / "memory" / "api_keys.json",
+            Path.cwd() / "memory" / "api_keys.json",
             Path("/root/jarvis/config/api_keys.json"),
             Path("/app/config/api_keys.json"),
+            Path("/app/memory/api_keys.json"),
             Path("/opt/data/api_keys.json"),
+            Path("/opt/data/memory/api_keys.json"),
         ]
 
     merged: dict[str, Any] = {}

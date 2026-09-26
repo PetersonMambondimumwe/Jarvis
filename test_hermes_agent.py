@@ -4,7 +4,13 @@ import unittest
 from pathlib import Path
 
 from actions import hermes_agent as hermes_action
-from core.hermes_client import HermesClient, HermesConfig, HermesError, extract_run_output
+from core.hermes_client import (
+    HermesClient,
+    HermesConfig,
+    HermesError,
+    extract_run_output,
+    load_hermes_config,
+)
 from core.hermes_task_manager import HermesTaskManager
 
 
@@ -73,6 +79,20 @@ class HermesClientTests(unittest.TestCase):
 
         with self.assertRaisesRegex(HermesError, "authentication failed"):
             client.verify()
+
+    def test_load_hermes_config_defaults_to_internal_token_on_private_host(self):
+        import os
+        old_key = os.environ.pop("HERMES_API_KEY", None)
+        old_base = os.environ.pop("HERMES_API_BASE", None)
+        try:
+            os.environ["HERMES_API_BASE"] = "http://jarvis-hermes:8642"
+            cfg = load_hermes_config()
+            self.assertEqual(cfg.api_key, "jarvis-hermes-internal-token")
+        finally:
+            if old_key is not None:
+                os.environ["HERMES_API_KEY"] = old_key
+            if old_base is not None:
+                os.environ["HERMES_API_BASE"] = old_base
 
     def test_extract_run_output_reads_responses_style_messages(self):
         output = extract_run_output(

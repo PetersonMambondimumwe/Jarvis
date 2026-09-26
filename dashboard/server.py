@@ -429,6 +429,7 @@ class DashboardServer:
             return False
         self._recent_commands[dedupe_key] = now + ttl
         await self._command_queue.put({"text": text, "request_id": clean_id})
+        asyncio.create_task(self.broadcast_audio_control("clear"))
         return True
 
     def _load_sessions(self) -> None:
@@ -785,6 +786,92 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
                 return JSONResponse({"ok": True})
             except Exception:
                 return JSONResponse({"ok": False, "error": "LinkedIn disconnect failed"}, status_code=500)
+
+        @app.get("/api/system/status")
+        async def system_status(req: Request):
+            if not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+            linkedin_info: dict[str, Any] = {"configured": False, "connected": False}
+            try:
+                from core.linkedin_client import LinkedInClient, load_linkedin_config
+                cfg = load_linkedin_config()
+                client = LinkedInClient(cfg)
+                st = client.status()
+                linkedin_info = {
+                    "configured": True,
+                    "connected": bool(st.get("connected")),
+                    "name": st.get("name") or "",
+                }
+            except Exception as e:
+                linkedin_info["error"] = str(e)[:120]
+
+            hermes_info: dict[str, Any] = {"configured": False, "reachable": False}
+            try:
+                from core.hermes_client import HermesClient, load_hermes_config
+                h_cfg = load_hermes_config()
+                hermes_info["configured"] = True
+                hermes_info["api_base"] = h_cfg.api_base
+                try:
+                    res = HermesClient(h_cfg).verify()
+                    hermes_info["reachable"] = True
+                    hermes_info["health"] = res.get("health", "ok")
+                    hermes_info["model"] = res.get("model", "")
+                except Exception as e:
+                    hermes_info["reachable"] = False
+                    hermes_info["error"] = str(e)[:120]
+            except Exception as e:
+                hermes_info["error"] = str(e)[:120]
+
+            leaf_info: dict[str, Any] = {"configured": False}
+            try:
+                from core.leaf_ai_client import load_leaf_ai_config
+                l_cfg = load_leaf_ai_config()
+                leaf_info["configured"] = True
+                leaf_info["api_url"] = l_cfg.api_url
+            except Exception as e:
+                leaf_info["error"] = str(e)[:120]
+
+            return JSONResponse({
+                "ok": True,
+                "version": "Mark-XLVIII-v2026.9.26",
+                "linkedin": linkedin_info,
+                "hermes": hermes_info,
+                "leaf_ai": leaf_info,
+            })
+
+        @app.post("/api/config")
+        async def update_config(req: Request):
+            if not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            try:
+                body = await req.json()
+                if not isinstance(body, dict):
+                    return JSONResponse({"ok": False, "error": "Invalid body"}, status_code=400)
+                allowed_keys = {
+                    "linkedin_client_id", "linkedin_client_secret", "linkedin_primary_client_secret",
+                    "hermes_api_key", "hermes_api_base", "hermes_timeout_seconds",
+                    "dify_api_key", "dify_api_url", "leaf_ai_dify_api_key", "leaf_ai_dify_api_url",
+                    "github_pat", "github_token", "vercel_token",
+                }
+                updates = {k: str(v).strip() for k, v in body.items() if k in allowed_keys and isinstance(v, (str, int))}
+                if not updates:
+                    return JSONResponse({"ok": False, "error": "No valid keys to update"}, status_code=400)
+
+                target_file = BASE_DIR / "memory" / "api_keys.json"
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                existing = {}
+                if target_file.exists():
+                    try:
+                        existing = json.loads(target_file.read_text(encoding="utf-8"))
+                    except Exception:
+                        existing = {}
+                existing.update(updates)
+                target_file.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+                return JSONResponse({"ok": True, "updated": list(updates.keys())})
+            except Exception as e:
+                return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 
         @app.post("/login")
         async def login(req: Request):

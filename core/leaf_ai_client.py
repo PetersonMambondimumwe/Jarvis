@@ -44,9 +44,22 @@ def load_leaf_ai_config() -> LeafAIConfig:
     )
 
     if not api_key or not api_url:
-        try:
-            if CONFIG_PATH.exists():
-                data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        candidates = [
+            CONFIG_PATH,
+            Path.cwd() / "config" / "api_keys.json",
+            _base_dir() / "memory" / "api_keys.json",
+            Path.cwd() / "memory" / "api_keys.json",
+            Path("/root/jarvis/config/api_keys.json"),
+            Path("/app/config/api_keys.json"),
+            Path("/app/memory/api_keys.json"),
+            Path("/opt/data/api_keys.json"),
+            Path("/opt/data/memory/api_keys.json"),
+        ]
+        for p in candidates:
+            if not p.exists():
+                continue
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
                 if not api_key:
                     api_key = str(
                         data.get("dify_api_key")
@@ -59,8 +72,10 @@ def load_leaf_ai_config() -> LeafAIConfig:
                         or data.get("leaf_ai_dify_api_url")
                         or ""
                     ).strip()
-        except Exception:
-            pass
+                if api_key and api_url:
+                    break
+            except Exception:
+                continue
 
     if not api_url:
         api_url = DEFAULT_DIFY_URL

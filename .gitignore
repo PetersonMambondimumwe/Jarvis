@@ -10,6 +10,7 @@ ENV/
 
 # Project Specific
 config/api_keys.json
+config/sessions.json
 config/certs/
 memory/*
 !memory/__init__.py

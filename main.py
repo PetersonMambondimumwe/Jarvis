@@ -916,6 +916,8 @@ class JarvisLive:
             speak_callback=self.speak,
         )
         self._last_user_speech = time.monotonic()  # updated on every user utterance
+        self._last_speak_text = ""
+        self._last_speak_time = 0.0
         # Initialize database caching layer
         self._db_cache_initialized = False
         # MCP Client Manager
@@ -980,9 +982,17 @@ class JarvisLive:
     def speak(self, text: str):
         if not self._loop or not self.session:
             return
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return
+        now = time.monotonic()
+        if cleaned == self._last_speak_text and (now - self._last_speak_time) < 3.0:
+            return
+        self._last_speak_text = cleaned
+        self._last_speak_time = now
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
-                turns={"parts": [{"text": text}]},
+                turns={"parts": [{"text": cleaned}]},
                 turn_complete=True
             ),
             self._loop

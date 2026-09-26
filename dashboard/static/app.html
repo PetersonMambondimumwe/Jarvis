@@ -1175,6 +1175,7 @@
       if (!txt) return;
       const requestId = _newCommandId();
       inp.value = '';
+      _stopAllAudio();
       append('user', txt, requestId);
       _ensureAudioCtx();
       _connectSpeaker();
@@ -1256,6 +1257,7 @@
 
     function _stopAllAudio() {
       _playTime = 0;
+      if (typeof _recentChunkHashes !== 'undefined') _recentChunkHashes.clear();
       for (const s of _activeAudioSources) {
         try { s.stop(); s.disconnect(); } catch (_) {}
       }
@@ -1346,6 +1348,18 @@
       return _audioSink;
     }
 
+    const _recentChunkHashes = new Map();
+    function _chunkChecksum(arrayBuf) {
+      const u8 = new Uint8Array(arrayBuf);
+      let hash = 0x811c9dc5;
+      const step = Math.max(1, Math.floor(u8.length / 32));
+      for (let i = 0; i < u8.length; i += step) {
+        hash ^= u8[i];
+        hash = Math.imul(hash, 0x01000193);
+      }
+      return `${u8.length}:${hash >>> 0}`;
+    }
+
     async function _playJarvisAudio(data) {
       if (typeof data === 'string') {
         try {
@@ -1362,6 +1376,17 @@
         arrayBuf = await data.arrayBuffer();
       }
       if (!(arrayBuf instanceof ArrayBuffer) || arrayBuf.byteLength <= 0) return;
+
+      const nowMs = Date.now();
+      const checksum = _chunkChecksum(arrayBuf);
+      for (const [k, exp] of _recentChunkHashes.entries()) {
+        if (exp < nowMs) _recentChunkHashes.delete(k);
+      }
+      if (_recentChunkHashes.has(checksum)) {
+        return; // Drop duplicate playback chunk to prevent overlapping voices
+      }
+      _recentChunkHashes.set(checksum, nowMs + 3000);
+
       try {
         if (window.speechSynthesis) window.speechSynthesis.cancel();
         const ctx = _ensureAudioCtx();
@@ -1405,6 +1430,9 @@
       if (_speakerWs) {
         const ws = _speakerWs;
         _speakerWs = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
         try {
           if (ws.readyState < WebSocket.CLOSING) ws.close();
         } catch (_) {}
@@ -1422,8 +1450,17 @@
 
     function _connectSpeaker() {
       if (!_speakerDesired()) return;
-      if (_speakerWs && (_speakerWs.readyState === WebSocket.OPEN || _speakerWs.readyState === WebSocket.CONNECTING)) {
-        return;
+      if (_speakerWs) {
+        if (_speakerWs.readyState === WebSocket.OPEN || _speakerWs.readyState === WebSocket.CONNECTING) {
+          return;
+        }
+        try {
+          _speakerWs.onmessage = null;
+          _speakerWs.onerror = null;
+          _speakerWs.onclose = null;
+          if (_speakerWs.readyState < WebSocket.CLOSING) _speakerWs.close();
+        } catch (_) {}
+        _speakerWs = null;
       }
       clearTimeout(_speakerReconnectTimer);
       const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';

@@ -70,9 +70,13 @@ def _load_all_hermes_config() -> tuple[dict[str, Any], dict[str, str]]:
         config_candidates = [
             CONFIG_PATH,
             Path.cwd() / "config" / "api_keys.json",
+            _base_dir() / "memory" / "api_keys.json",
+            Path.cwd() / "memory" / "api_keys.json",
             Path("/root/jarvis/config/api_keys.json"),
             Path("/app/config/api_keys.json"),
+            Path("/app/memory/api_keys.json"),
             Path("/opt/data/api_keys.json"),
+            Path("/opt/data/memory/api_keys.json"),
         ]
 
     custom_env = os.environ.get("JARVIS_ENV_PATH") or os.environ.get("ENV_PATH")
@@ -126,7 +130,10 @@ def load_hermes_config() -> HermesConfig:
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise HermesError("hermes_api_base must be a valid HTTP or HTTPS URL")
     if not api_key:
-        raise HermesError("hermes_api_key is not configured")
+        if parsed.hostname in private_http_hosts:
+            api_key = "jarvis-hermes-internal-token"
+        else:
+            raise HermesError("hermes_api_key is not configured")
 
     return HermesConfig(api_base=api_base, api_key=api_key, timeout=max(5, min(timeout, 60)))
 
@@ -208,7 +215,24 @@ class HermesClient:
 
         if response.status_code >= 400:
             if response.status_code == 401:
-                message = "Hermes authentication failed"
+                if "Authorization" in headers:
+                    no_auth_headers = {k: v for k, v in headers.items() if k != "Authorization"}
+                    try:
+                        retry_resp = self.session.request(
+                            method,
+                            f"{endpoint}{path}",
+                            headers=no_auth_headers,
+                            timeout=self.config.timeout,
+                            **kwargs,
+                        )
+                        if retry_resp.status_code < 400:
+                            try:
+                                return retry_resp.json()
+                            except ValueError:
+                                return {}
+                    except Exception:
+                        pass
+                message = "Hermes authentication failed. Ensure HERMES_API_KEY matches between Jarvis and the Hermes container."
             elif response.status_code == 404:
                 message = "Hermes endpoint or task was not found"
             elif response.status_code == 409:
