@@ -152,6 +152,7 @@ async def run_session_loop(
         finally:
             jarvis.session = None
             jarvis.task_manager.stop_polling()
+            jarvis.hermes_task_manager.stop_polling()
             if getattr(jarvis, "_db_cache_initialized", False):
                 db_cleanup()
 

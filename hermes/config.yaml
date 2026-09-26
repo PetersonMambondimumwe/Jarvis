@@ -1,0 +1,31 @@
+model:
+  default: gemini-3.7-flash
+  provider: gemini
+  base_url: https://generativelanguage.googleapis.com/v1beta
+
+terminal:
+  backend: local
+  cwd: /opt/data/workspace
+  timeout: 180
+  home_mode: profile
+
+web:
+  backend: ddgs
+
+approvals:
+  mode: smart
+  timeout: 300
+  unattended_mode: deny
+  cron_mode: deny
+  single_query_mode: deny
+  destructive_slash_confirm: true
+
+skills:
+  guard_agent_created: true
+
+gateway:
+  api_server:
+    max_concurrent_runs: 2
+
+display:
+  interim_assistant_messages: false

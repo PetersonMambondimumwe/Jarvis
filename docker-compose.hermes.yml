@@ -1,0 +1,28 @@
+services:
+  hermes:
+    image: nousresearch/hermes-agent:stable
+    container_name: jarvis-hermes
+    restart: unless-stopped
+    command: ["gateway", "run"]
+    env_file:
+      - /root/jarvis/config/hermes.env
+    environment:
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: "0.0.0.0"
+      API_SERVER_PORT: "8642"
+      TZ: Africa/Johannesburg
+    expose:
+      - "8642"
+    volumes:
+      - jarvis-hermes-data:/opt/data
+      - ./hermes/config.yaml:/opt/data/config.yaml:ro
+    networks:
+      - dokploy-network
+
+volumes:
+  jarvis-hermes-data:
+    name: jarvis-hermes-data
+
+networks:
+  dokploy-network:
+    external: true

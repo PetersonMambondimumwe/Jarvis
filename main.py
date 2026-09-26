@@ -72,11 +72,13 @@ from actions.system_monitor    import SystemMonitor, get_system_status
 from actions.database_manager   import database_manager, db_cleanup
 from actions.proactive         import ProactiveEngine
 from actions.edith_agent        import edith_agent
+from actions.hermes_agent       import hermes_agent
 from actions.github_manager     import github_manager
 from actions.vercel_manager     import vercel_manager
 from actions.antigravity_bridge import antigravity_bridge
 from core.perception_engine     import PerceptionEngine
 from core.task_manager          import TaskManager
+from core.hermes_task_manager   import HermesTaskManager
 from core.mcp_client            import MCPClientManager
 from core.honcho_memory         import HonchoMemory
 
@@ -750,6 +752,32 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "hermes_agent",
+        "description": (
+            "Delegates multi-step work to Hermes for asynchronous background execution. "
+            "Use this for tasks that require tools or continued work while Jarvis remains "
+            "available. Also checks status, cancels tasks, and handles explicit approvals."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "delegate | verify | status | cancel | approve | deny"
+                },
+                "task": {
+                    "type": "STRING",
+                    "description": "Complete, specific task for Hermes when delegating."
+                },
+                "task_id": {
+                    "type": "STRING",
+                    "description": "Hermes task ID for status, cancel, approve, or deny."
+                }
+            },
+            "required": []
+        }
+    },
+    {
         "name": "memory_status",
         "description": (
             "Checks whether Jarvis's self-hosted Honcho long-term memory is "
@@ -827,6 +855,10 @@ class JarvisLive:
         self._proactive        = ProactiveEngine()
         self._perception       = PerceptionEngine(api_key=_get_api_key(), player=self.ui)
         self.task_manager     = TaskManager(player=self.ui, speak_callback=self.speak)
+        self.hermes_task_manager = HermesTaskManager(
+            player=self.ui,
+            speak_callback=self.speak,
+        )
         self._last_user_speech = time.monotonic()  # updated on every user utterance
         # Initialize database caching layer
         self._db_cache_initialized = False
@@ -1061,6 +1093,14 @@ class JarvisLive:
             ),
             timeout=180)
 
+        r.register("hermes_agent",
+            lambda args: hermes_agent(
+                parameters=args,
+                player=ui,
+                task_manager=self.hermes_task_manager,
+            ),
+            timeout=30)
+
         r.register("github_manager",
             lambda args: github_manager(
                 parameters=args,
@@ -1240,6 +1280,7 @@ class JarvisLive:
     async def _send_realtime(self):
         # Start the task manager polling loop when Jarvis starts
         self.task_manager.start_polling()
+        self.hermes_task_manager.start_polling()
         while True:
             msg = await self.out_queue.get()
             await self.session.send_realtime_input(media=msg)
