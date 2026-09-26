@@ -5,7 +5,12 @@ services:
     restart: unless-stopped
     command: ["gateway", "run"]
     env_file:
-      - /root/jarvis/config/hermes.env
+      - path: /root/jarvis/config/hermes.env
+        required: false
+      - path: /root/jarvis/.env
+        required: false
+      - path: .env
+        required: false
     environment:
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: "0.0.0.0"
@@ -23,6 +28,7 @@ services:
       - ./hermes/config.yaml:/opt/data/config.yaml:ro
       - /root/jarvis/config/api_keys.json:/opt/data/api_keys.json:ro
     networks:
+      - default
       - dokploy-network
 
 volumes:
@@ -30,5 +36,6 @@ volumes:
     name: jarvis-hermes-data
 
 networks:
+  default:
   dokploy-network:
     external: true

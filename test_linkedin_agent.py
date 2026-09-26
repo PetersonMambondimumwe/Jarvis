@@ -117,6 +117,60 @@ class LinkedInClientTests(unittest.TestCase):
                 else:
                     os.environ[key] = value
 
+    def test_api_key_and_secret_aliases_supported(self):
+        keys = ["LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET", "LINKEDIN_API_KEY", "LINKEDIN_API_SECRET"]
+        previous = {key: os.environ.get(key) for key in keys}
+        try:
+            os.environ.pop("LINKEDIN_CLIENT_ID", None)
+            os.environ.pop("LINKEDIN_CLIENT_SECRET", None)
+            os.environ["LINKEDIN_API_KEY"] = "alias-key-123"
+            os.environ["LINKEDIN_API_SECRET"] = "alias-secret-456"
+            config = load_linkedin_config()
+            self.assertEqual(config.client_id, "alias-key-123")
+            self.assertEqual(config.client_secret, "alias-secret-456")
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_nested_linkedin_config_json_supported(self):
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            cfg_path = Path(directory) / "api_keys.json"
+            cfg_path.write_text(
+                json.dumps({"linkedin": {"client_id": "nested-id", "client_secret": "nested-secret"}}),
+                encoding="utf-8",
+            )
+            old_custom = os.environ.get("JARVIS_CONFIG_PATH")
+            old_custom_env = os.environ.get("JARVIS_ENV_PATH")
+            empty_env = Path(directory) / "empty.env"
+            empty_env.write_text("", encoding="utf-8")
+            try:
+                os.environ["JARVIS_CONFIG_PATH"] = str(cfg_path)
+                os.environ["JARVIS_ENV_PATH"] = str(empty_env)
+                # Ensure env vars don't override the file
+                keys = ["LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET", "LINKEDIN_API_KEY", "LINKEDIN_API_SECRET"]
+                prev_env = {k: os.environ.pop(k, None) for k in keys}
+                try:
+                    config = load_linkedin_config()
+                    self.assertEqual(config.client_id, "nested-id")
+                    self.assertEqual(config.client_secret, "nested-secret")
+                finally:
+                    for k, v in prev_env.items():
+                        if v is not None:
+                            os.environ[k] = v
+            finally:
+                if old_custom is not None:
+                    os.environ["JARVIS_CONFIG_PATH"] = old_custom
+                else:
+                    os.environ.pop("JARVIS_CONFIG_PATH", None)
+                if old_custom_env is not None:
+                    os.environ["JARVIS_ENV_PATH"] = old_custom_env
+                else:
+                    os.environ.pop("JARVIS_ENV_PATH", None)
+
 
 class LinkedInActionTests(unittest.TestCase):
     def test_publish_requires_explicit_confirmation_of_existing_draft(self):

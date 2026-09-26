@@ -32,20 +32,90 @@ class HermesConfig:
     timeout: int = 20
 
 
-def load_hermes_config() -> HermesConfig:
-    data: dict[str, Any] = {}
+def _read_config_json(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
     try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        if not (os.getenv("HERMES_API_KEY") or os.getenv("HERMES_API_BASE")):
-            raise HermesError("config/api_keys.json is missing") from exc
-    except (json.JSONDecodeError, OSError) as exc:
-        raise HermesError(f"Hermes configuration could not be read: {exc}") from exc
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
-    api_base = str(os.getenv("HERMES_API_BASE") or data.get("hermes_api_base") or "http://jarvis-hermes:8642").rstrip("/")
-    api_key = str(os.getenv("HERMES_API_KEY") or data.get("hermes_api_key") or "").strip()
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    env_vars: dict[str, str] = {}
     try:
-        timeout = int(os.getenv("HERMES_TIMEOUT_SECONDS") or data.get("hermes_timeout_seconds") or 20)
+        content = path.read_text(encoding="utf-8")
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            v = v.strip().strip("'\"")
+            if k:
+                env_vars[k] = v
+    except Exception:
+        pass
+    return env_vars
+
+
+def _load_all_hermes_config() -> tuple[dict[str, Any], dict[str, str]]:
+    custom_cfg = os.environ.get("JARVIS_CONFIG_PATH") or os.environ.get("CONFIG_PATH")
+    if custom_cfg:
+        config_candidates = [Path(custom_cfg)]
+    else:
+        config_candidates = [
+            CONFIG_PATH,
+            Path.cwd() / "config" / "api_keys.json",
+            Path("/root/jarvis/config/api_keys.json"),
+            Path("/app/config/api_keys.json"),
+            Path("/opt/data/api_keys.json"),
+        ]
+
+    custom_env = os.environ.get("JARVIS_ENV_PATH") or os.environ.get("ENV_PATH")
+    if custom_env:
+        env_candidates = [Path(custom_env)]
+    else:
+        env_candidates = [
+            _base_dir() / ".env",
+            Path.cwd() / ".env",
+            Path("/root/jarvis/.env"),
+            Path("/root/jarvis/config/hermes.env"),
+            Path("/root/jarvis/config/jarvis.env"),
+            Path("/app/.env"),
+        ]
+    merged_config: dict[str, Any] = {}
+    for p in config_candidates:
+        for k, v in _read_config_json(p).items():
+            if k not in merged_config or not merged_config[k]:
+                merged_config[k] = v
+
+    merged_env: dict[str, str] = {}
+    for p in env_candidates:
+        for k, v in _read_env_file(p).items():
+            if k not in merged_env or not merged_env[k]:
+                merged_env[k] = v
+
+    return merged_config, merged_env
+
+
+def load_hermes_config() -> HermesConfig:
+    config_vars, env_vars = _load_all_hermes_config()
+
+    def _get(key: str, default: str = "") -> str:
+        return (
+            os.environ.get(key)
+            or env_vars.get(key)
+            or str(config_vars.get(key) or config_vars.get(key.lower()) or default)
+        ).strip()
+
+    api_base = _get("HERMES_API_BASE", _get("hermes_api_base", "http://jarvis-hermes:8642")).rstrip("/")
+    api_key = _get("HERMES_API_KEY", _get("hermes_api_key", ""))
+    try:
+        timeout = int(_get("HERMES_TIMEOUT_SECONDS", _get("hermes_timeout_seconds", "20")))
     except (TypeError, ValueError):
         timeout = 20
 
@@ -98,16 +168,38 @@ class HermesClient:
     def _request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
         headers = dict(self._headers)
         headers.update(kwargs.pop("headers", {}))
-        try:
-            response = self.session.request(
-                method,
-                f"{self.config.api_base}{path}",
-                headers=headers,
-                timeout=self.config.timeout,
-                **kwargs,
-            )
-        except requests.RequestException as exc:
-            raise HermesError(f"Hermes is unreachable: {exc}") from exc
+
+        # Build candidate URLs for private container networks
+        parsed = urlparse(self.config.api_base)
+        endpoints = [self.config.api_base]
+        if parsed.scheme == "http" and parsed.hostname in {"jarvis-hermes", "hermes"}:
+            alt_host = "hermes" if parsed.hostname == "jarvis-hermes" else "jarvis-hermes"
+            port_part = f":{parsed.port}" if parsed.port else ":8642"
+            alt_url = f"{parsed.scheme}://{alt_host}{port_part}"
+            if alt_url not in endpoints:
+                endpoints.append(alt_url)
+            local_url = f"{parsed.scheme}://127.0.0.1{port_part}"
+            if local_url not in endpoints:
+                endpoints.append(local_url)
+
+        response = None
+        last_exc: Exception | None = None
+        for endpoint in endpoints:
+            try:
+                response = self.session.request(
+                    method,
+                    f"{endpoint}{path}",
+                    headers=headers,
+                    timeout=self.config.timeout,
+                    **kwargs,
+                )
+                break
+            except requests.RequestException as exc:
+                last_exc = exc
+                continue
+
+        if response is None:
+            raise HermesError(f"Hermes is unreachable: {last_exc}") from last_exc
 
         try:
             body = response.json()

@@ -24,7 +24,10 @@ class FakeSession:
 
     def request(self, method, url, **kwargs):
         self.calls.append((method, url, kwargs))
-        return self.responses.pop(0)
+        item = self.responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
 
 
 class HermesClientTests(unittest.TestCase):
@@ -45,6 +48,24 @@ class HermesClientTests(unittest.TestCase):
         self.assertIn("GitHub", kwargs["json"]["instructions"])
         self.assertIn("Vercel", kwargs["json"]["instructions"])
         self.assertIn("execution", kwargs["json"]["instructions"].lower())
+
+    def test_request_falls_back_to_alternate_host_on_dns_failure(self):
+        import requests
+        session = FakeSession([
+            requests.exceptions.ConnectionError("Failed to resolve 'jarvis-hermes'"),
+            FakeResponse(200, {"status": "ok"}),
+            FakeResponse(200, {"model": "hermes-agent", "features": {"run_submission": True}}),
+        ])
+        client = HermesClient(
+            HermesConfig("http://jarvis-hermes:8642", "test-secret"),
+            session=session,
+        )
+
+        status = client.verify()
+        self.assertEqual(status["health"], "ok")
+        # First call failed on jarvis-hermes, second succeeded on hermes
+        self.assertEqual(session.calls[0][1], "http://jarvis-hermes:8642/health/detailed")
+        self.assertEqual(session.calls[1][1], "http://hermes:8642/health/detailed")
 
     def test_authentication_errors_do_not_expose_response_details(self):
         session = FakeSession([FakeResponse(401, {"error": "secret upstream detail"})])

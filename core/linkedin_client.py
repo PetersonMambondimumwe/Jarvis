@@ -43,7 +43,7 @@ class LinkedInConfig:
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
-    if not path.exists():
+    if not path.is_file():
         return {}
     env_vars: dict[str, str] = {}
     try:
@@ -63,17 +63,73 @@ def _read_env_file(path: Path) -> dict[str, str]:
 
 
 def _read_config_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
+    if not path.is_file():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
 
+def _get_all_env_vars() -> dict[str, str]:
+    custom = os.environ.get("JARVIS_ENV_PATH") or os.environ.get("ENV_PATH")
+    if custom:
+        candidates = [Path(custom)]
+    else:
+        candidates = [
+            ENV_PATH,
+            Path.cwd() / ".env",
+            Path("/root/jarvis/.env"),
+            Path("/root/jarvis/config/hermes.env"),
+            Path("/root/jarvis/config/jarvis.env"),
+            Path("/app/.env"),
+        ]
+
+    merged: dict[str, str] = {}
+    for p in candidates:
+        for k, v in _read_env_file(p).items():
+            if k not in merged or not merged[k]:
+                merged[k] = v
+    return merged
+
+
+def _get_all_config_vars() -> dict[str, Any]:
+    custom = os.environ.get("JARVIS_CONFIG_PATH") or os.environ.get("CONFIG_PATH")
+    if custom:
+        candidates = [Path(custom)]
+    else:
+        candidates = [
+            CONFIG_PATH,
+            Path.cwd() / "config" / "api_keys.json",
+            Path("/root/jarvis/config/api_keys.json"),
+            Path("/app/config/api_keys.json"),
+            Path("/opt/data/api_keys.json"),
+        ]
+
+    merged: dict[str, Any] = {}
+    for p in candidates:
+        file_data = _read_config_json(p)
+        if not file_data:
+            continue
+        unpacked: dict[str, Any] = {}
+        for parent in ("linkedin", "linkedin_oauth", "linkedin_api"):
+            sub = file_data.get(parent)
+            if isinstance(sub, dict):
+                for k, v in sub.items():
+                    if isinstance(v, str) and v.strip():
+                        unpacked[f"linkedin_{k}"] = v.strip()
+                        unpacked[k] = v.strip()
+        for k, v in {**unpacked, **file_data}.items():
+            if k not in merged or not merged[k]:
+                merged[k] = v
+
+    return merged
+
+
 def load_linkedin_config() -> LinkedInConfig:
-    env_vars = _read_env_file(ENV_PATH)
-    config_vars = _read_config_json(CONFIG_PATH)
+    env_vars = _get_all_env_vars()
+    config_vars = _get_all_config_vars()
 
     def _lookup(*keys: str) -> str:
         for k in keys:
@@ -90,13 +146,31 @@ def load_linkedin_config() -> LinkedInConfig:
                 return val
         return ""
 
-    client_id = _lookup("LINKEDIN_CLIENT_ID", "linkedin_client_id")
+    client_id = _lookup(
+        "LINKEDIN_CLIENT_ID",
+        "LINKEDIN_API_KEY",
+        "LINKEDIN_KEY",
+        "LINKEDIN_APP_ID",
+        "LINKEDIN_CLIENT_KEY",
+        "linkedin_client_id",
+        "linkedin_api_key",
+        "linkedin_key",
+        "linkedin_app_id",
+        "linkedin_client_key",
+    )
     client_secret = _lookup(
         "LINKEDIN_CLIENT_SECRET",
         "LINKEDIN_PRIMARY_CLIENT_SECRET",
         "LINKEDIN_PRIMARY_CLIENT_SECTRET",
+        "LINKEDIN_API_SECRET",
+        "LINKEDIN_SECRET",
+        "LINKEDIN_SECRET_KEY",
         "linkedin_client_secret",
         "linkedin_primary_client_secret",
+        "linkedin_primary_client_sectret",
+        "linkedin_api_secret",
+        "linkedin_secret",
+        "linkedin_secret_key",
     )
     redirect_uri = (
         _lookup("LINKEDIN_REDIRECT_URI", "linkedin_redirect_uri")
