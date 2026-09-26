@@ -26,5 +26,9 @@ services:
       - LINKEDIN_CLIENT_SECRET=${LINKEDIN_CLIENT_SECRET:-}
       - LINKEDIN_PRIMARY_CLIENT_SECTRET=${LINKEDIN_PRIMARY_CLIENT_SECTRET:-}
       - LINKEDIN_REDIRECT_URI=${LINKEDIN_REDIRECT_URI:-https://jarvis.littleheartsacademy.online/auth/linkedin/callback}
+      - DIFY_API_KEY=${DIFY_API_KEY:-}
+      - DIFY_API_URL=${DIFY_API_URL:-https://asc-assistant-dify-662116-169-58-74-235.sslip.io/v1}
+      - LEAF_AI_DIFY_API_KEY=${LEAF_AI_DIFY_API_KEY:-}
+      - LEAF_AI_DIFY_API_URL=${LEAF_AI_DIFY_API_URL:-}
     # IPC and shm configuration for high-throughput audio queues
     shm_size: '512m'

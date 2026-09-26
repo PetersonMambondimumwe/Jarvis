@@ -77,6 +77,8 @@ from actions.linkedin_agent     import linkedin_agent
 from actions.github_manager     import github_manager
 from actions.vercel_manager     import vercel_manager
 from actions.antigravity_bridge import antigravity_bridge
+from actions.leaf_ai_knowledge import leaf_ai_knowledge
+from core.leaf_ai_client      import is_leaf_ai_query
 from core.perception_engine     import PerceptionEngine
 from core.task_manager          import TaskManager
 from core.hermes_task_manager   import HermesTaskManager
@@ -850,6 +852,27 @@ TOOL_DECLARATIONS = [
             "required": []
         }
     },
+    {
+        "name": "leaf_ai_knowledge",
+        "description": (
+            "Queries the dedicated Leaf AI knowledge source for University of Pretoria (UP) "
+            "academic assistance, Academic Success Coaches (ASC), Department of Student Affairs, "
+            "course modules, prerequisites, campus bus schedules, and questions specifically related "
+            "to Leaf AI. Automatically route any Leaf AI or UP campus questions here, retrieve "
+            "the response, and present it naturally in your voice as Jarvis without exposing Dify "
+            "or internal integration details."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {
+                    "type": "STRING",
+                    "description": "The question, topic, or inquiry to look up in the Leaf AI knowledge source."
+                }
+            },
+            "required": ["query"]
+        }
+    },
 ]
 
 # --- Plugin system ---
@@ -1160,6 +1183,13 @@ class JarvisLive:
                 speak=self.speak,
             ),
             timeout=30)
+
+        r.register("leaf_ai_knowledge",
+            lambda args: leaf_ai_knowledge(
+                parameters=args,
+                player=ui,
+            ),
+            timeout=35)
 
     def _register_mcp_tools(self) -> None:
         """Register dynamically discovered MCP tools into ToolRegistry."""
@@ -1681,7 +1711,34 @@ class JarvisLive:
                         except asyncio.TimeoutError:
                             print("[Dashboard] Text command timed out waiting for turn completion")
                 else:
-                    print(f"[Dashboard] Dropped command (no session): {text}")
+                    if is_leaf_ai_query(text):
+                        self.ui.write_log(f"You: {text}")
+                        if self._dashboard:
+                            from core.time_util import get_sast_now
+                            user_log = {
+                                "type": "log", "speaker": "user",
+                                "text": text,
+                                "ts": get_sast_now().isoformat(),
+                            }
+                            if request_id:
+                                user_log["request_id"] = request_id
+                            asyncio.create_task(self._dashboard.broadcast(user_log))
+                        leaf_resp = await asyncio.to_thread(
+                            leaf_ai_knowledge,
+                            {"query": text},
+                            player=self.ui,
+                        )
+                        self.ui.write_log(f"Jarvis: {leaf_resp}")
+                        if self._dashboard:
+                            from core.time_util import get_sast_now
+                            asyncio.create_task(self._dashboard.broadcast({
+                                "type": "log", "speaker": "jarvis",
+                                "text": leaf_resp,
+                                "ts": get_sast_now().isoformat(),
+                            }))
+                        self.speak(leaf_resp)
+                    else:
+                        print(f"[Dashboard] Dropped command (no session): {text}")
             except asyncio.TimeoutError:
                 pass
             except Exception as e:
