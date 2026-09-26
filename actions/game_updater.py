@@ -1005,7 +1005,6 @@ def game_updater(parameters: dict, player=None, speak=None) -> str:
                             ).start()
                             msg += " Auto-shutdown enabled."
                         if player: player.write_log(f"[GameUpdater] {msg[:100]}")
-                        if speak:  speak(msg)
                         return msg
                     else:
                         results.append(
@@ -1041,7 +1040,6 @@ def game_updater(parameters: dict, player=None, speak=None) -> str:
 
         output = " | ".join(results) or "Nothing to do."
         if player: player.write_log(f"[GameUpdater] {output[:100]}")
-        if speak:  speak(output)
         return output
 
     return f"Unknown action: '{action}'."

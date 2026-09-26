@@ -324,9 +324,6 @@ def flight_finder(parameters: dict, player=None, speak=None) -> str:
     if player:
         player.write_log(f"[FlightFinder] {origin} → {destination} on {date}")
 
-    if speak:
-        speak(f"Searching flights from {origin} to {destination} on {date}, sir.")
-
     print(
         f"[FlightFinder] ▶️ {origin} → {destination} | {date}"
         f"{' → ' + return_date if return_date else ''}"
@@ -341,15 +338,8 @@ def flight_finder(parameters: dict, player=None, speak=None) -> str:
         if not raw_text:
             return "Could not retrieve flight data, sir. The page may not have loaded."
 
-        if speak:
-            speak("Analysing the results now, sir.")
-
         flights = _parse_flights_with_gemini(raw_text, origin, destination, date)
         spoken  = _format_spoken(flights, origin, destination, date)
-
-        if speak:
-            speak(spoken)
-
         result = spoken
 
         if save and flights:

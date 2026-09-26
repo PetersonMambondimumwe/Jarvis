@@ -922,7 +922,10 @@ class JarvisLive:
         )
         self._last_user_speech = time.monotonic()  # updated on every user utterance
         self._last_speak_text = ""
+        self._last_speak_norm = ""
         self._last_speak_time = 0.0
+        self._last_response_norm = ""
+        self._last_response_time = 0.0
         # Initialize database caching layer
         self._db_cache_initialized = False
         # MCP Client Manager
@@ -945,9 +948,31 @@ class JarvisLive:
         manual = self._dashboard.get_manual_url()
         return url, key, f"{url}/auto-login?key={key}", manual
 
+    def clear_audio_queue(self) -> int:
+        """Flushes all queued incoming audio chunks and returns count drained."""
+        q = self.audio_in_queue
+        drained = 0
+        if q:
+            while not q.empty():
+                try:
+                    q.get_nowait()
+                    drained += 1
+                except (asyncio.QueueEmpty, Exception):
+                    break
+        return drained
+
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
             return
+        self.clear_audio_queue()
+        if self._dashboard:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self._dashboard.broadcast_audio_control("clear"),
+                    self._loop
+                )
+            except Exception:
+                pass
         self._pending_text_command = text.strip()
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
@@ -968,20 +993,21 @@ class JarvisLive:
     def interrupt(self) -> None:
         """Stop JARVIS mid-speech: drain queued audio and open mic immediately."""
         self._interrupted = True
-        q = self.audio_in_queue
-        if q:
-            drained = 0
-            while True:
-                try:
-                    q.get_nowait()
-                    drained += 1
-                except Exception:
-                    break
-            if drained:
-                print(f"[JARVIS] ✋ Interrupted — {drained} audio chunks discarded")
+        drained = self.clear_audio_queue()
+        if drained:
+            print(f"[JARVIS] ✋ Interrupted — {drained} audio chunks discarded")
         self.set_speaking(False)
         if self._turn_done_event:
             self._turn_done_event.clear()
+        if self._dashboard:
+            try:
+                if self._loop and self._loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        self._dashboard.broadcast_audio_control("clear"),
+                        self._loop
+                    )
+            except Exception:
+                pass
         self.ui.write_log("SYS: Interrupted — listening...")
 
     def speak(self, text: str):
@@ -991,10 +1017,24 @@ class JarvisLive:
         if not cleaned:
             return
         now = time.monotonic()
-        if cleaned == self._last_speak_text and (now - self._last_speak_time) < 3.0:
+        import re
+        norm_text = re.sub(r'\s+', ' ', cleaned.lower().strip())
+        if norm_text == getattr(self, "_last_speak_norm", "") and (now - getattr(self, "_last_speak_time", 0.0)) < 8.0:
             return
+        self._last_speak_norm = norm_text
         self._last_speak_text = cleaned
         self._last_speak_time = now
+
+        self.clear_audio_queue()
+        if self._dashboard:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self._dashboard.broadcast_audio_control("clear"),
+                    self._loop
+                )
+            except Exception:
+                pass
+
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
                 turns={"parts": [{"text": cleaned}]},
@@ -1431,6 +1471,9 @@ class JarvisLive:
                         else:
                             if self._turn_done_event and self._turn_done_event.is_set():
                                 self._turn_done_event.clear()
+                                self.clear_audio_queue()
+                                if self._dashboard:
+                                    asyncio.create_task(self._dashboard.broadcast_audio_control("clear"))
                             # Split into ~100 ms chunks to minimize network packet overhead
                             # (24000 Hz × 2 bytes/sample × 0.10 s = 4800 bytes per slice)
                             _audio_data = response.data
@@ -1443,11 +1486,7 @@ class JarvisLive:
 
                         if getattr(sc, "interrupted", False):
                             self._interrupted = True
-                            while not self.audio_in_queue.empty():
-                                try:
-                                    self.audio_in_queue.get_nowait()
-                                except asyncio.QueueEmpty:
-                                    break
+                            self.clear_audio_queue()
                             if self._dashboard:
                                 asyncio.create_task(self._dashboard.broadcast_audio_control("clear"))
 
@@ -1500,18 +1539,31 @@ class JarvisLive:
                             in_buf = []
 
                             full_out = " ".join(out_buf).strip()
-                            if full_out:
-                                self.ui.write_log(f"Jarvis: {full_out}")
-                                if self._dashboard:
-                                    from core.time_util import get_sast_now
-                                    asyncio.create_task(self._dashboard.broadcast({
-                                        "type": "log", "speaker": "jarvis",
-                                        "text": full_out,
-                                        "ts": get_sast_now().isoformat(),
-                                    }))
                             out_buf = []
+                            is_dup = False
+                            if full_out:
+                                import re
+                                norm_resp = re.sub(r'\s+', ' ', full_out.lower().strip())
+                                now = time.monotonic()
+                                if (
+                                    norm_resp == getattr(self, "_last_response_norm", "")
+                                    and (now - getattr(self, "_last_response_time", 0.0)) < 4.0
+                                ):
+                                    is_dup = True
+                                    print(f"[JARVIS] ⚠️ Suppressing duplicate response logging/broadcast: {full_out[:60]}...")
+                                else:
+                                    self._last_response_norm = norm_resp
+                                    self._last_response_time = now
+                                    self.ui.write_log(f"Jarvis: {full_out}")
+                                    if self._dashboard:
+                                        from core.time_util import get_sast_now
+                                        asyncio.create_task(self._dashboard.broadcast({
+                                            "type": "log", "speaker": "jarvis",
+                                            "text": full_out,
+                                            "ts": get_sast_now().isoformat(),
+                                        }))
 
-                            if full_in or full_out:
+                            if (full_in or full_out) and not is_dup:
                                 asyncio.create_task(asyncio.to_thread(
                                     self._honcho.record_turn,
                                     full_in,
@@ -1728,6 +1780,9 @@ class JarvisLive:
                         break
                     await asyncio.sleep(0.1)
                 if self.session:
+                    self.clear_audio_queue()
+                    if self._dashboard:
+                        asyncio.create_task(self._dashboard.broadcast_audio_control("clear"))
                     self._pending_text_command = text.strip()
                     self._pending_text_command_id = request_id
                     command_done = self._command_done_event
