@@ -834,7 +834,12 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
                 return result_page(False, "The authorization request expired or was invalid. Return to Jarvis and try again.")
             if error:
                 detail = error_description or error
-                return result_page(False, f"LinkedIn declined the request: {detail[:200]}")
+                hint = ""
+                if "openid" in detail.lower():
+                    hint = " Tip: In LinkedIn Developer Portal, go to your App > Products tab and click 'Request access' on 'Sign In with LinkedIn using OpenID Connect' (free, instant approval)."
+                elif "scope" in detail.lower():
+                    hint = " Tip: Ensure all requested scopes are authorized under the Products tab in LinkedIn Developer Portal."
+                return result_page(False, f"LinkedIn declined the request: {detail[:200]}.{hint}")
             try:
                 from core.linkedin_client import LinkedInClient, load_linkedin_config
 
@@ -875,6 +880,7 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
                     "configured": True,
                     "connected": bool(st.get("connected")),
                     "name": st.get("name") or "",
+                    "scopes": getattr(cfg, "scopes", ""),
                 }
             except Exception as e:
                 linkedin_info["error"] = str(e)[:120]
@@ -923,6 +929,7 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
                     return JSONResponse({"ok": False, "error": "Invalid body"}, status_code=400)
                 allowed_keys = {
                     "linkedin_client_id", "linkedin_client_secret", "linkedin_primary_client_secret",
+                    "linkedin_scopes", "linkedin_member_id", "linkedin_redirect_uri",
                     "hermes_api_key", "hermes_api_base", "hermes_timeout_seconds",
                     "dify_api_key", "dify_api_url", "leaf_ai_dify_api_key", "leaf_ai_dify_api_url",
                     "github_pat", "github_token", "vercel_token",

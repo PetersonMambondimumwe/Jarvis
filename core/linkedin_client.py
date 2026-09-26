@@ -39,6 +39,8 @@ class LinkedInConfig:
     client_id: str
     client_secret: str
     redirect_uri: str
+    scopes: str = "openid profile email w_member_social"
+    member_id: str = ""
     timeout: int = 20
 
 
@@ -180,13 +182,20 @@ def load_linkedin_config() -> LinkedInConfig:
         _lookup("LINKEDIN_REDIRECT_URI", "linkedin_redirect_uri")
         or "https://jarvis.littleheartsacademy.online/auth/linkedin/callback"
     )
+    scopes = _lookup("LINKEDIN_SCOPES", "linkedin_scopes") or "openid profile email w_member_social"
+    if "," in scopes:
+        scopes = " ".join(s.strip() for s in scopes.split(",") if s.strip())
+
+    member_id = _lookup("LINKEDIN_MEMBER_ID", "LINKEDIN_PERSON_URN", "LINKEDIN_AUTHOR_URN", "linkedin_member_id")
+    if member_id.startswith("urn:li:person:"):
+        member_id = member_id.removeprefix("urn:li:person:")
 
     if not client_id or not client_secret:
         raise LinkedInError("LinkedIn client credentials are not configured")
     parsed = urlparse(redirect_uri)
     if parsed.scheme != "https" or not parsed.netloc:
         raise LinkedInError("LinkedIn redirect URI must be a valid HTTPS URL")
-    return LinkedInConfig(client_id, client_secret, redirect_uri)
+    return LinkedInConfig(client_id, client_secret, redirect_uri, scopes, member_id)
 
 
 class LinkedInTokenStore:
@@ -244,7 +253,7 @@ class LinkedInClient:
                 "client_id": self.config.client_id,
                 "redirect_uri": self.config.redirect_uri,
                 "state": state,
-                "scope": "openid profile email w_member_social",
+                "scope": self.config.scopes,
             }
         )
         return f"{AUTHORIZATION_URL}?{query}"
@@ -284,16 +293,48 @@ class LinkedInClient:
         token = {
             "access_token": access_token,
             "expires_at": int(time.time()) + expires_in,
-            "scope": str(body.get("scope") or ""),
+            "scope": str(body.get("scope") or self.config.scopes),
         }
-        profile = self._request_userinfo(access_token)
+        profile: dict[str, Any] = {}
+        if "openid" in self.config.scopes:
+            try:
+                profile = self._request_userinfo(access_token)
+            except Exception:
+                profile = {}
+
+        if not profile.get("sub"):
+            try:
+                me_resp = self.session.get(
+                    "https://api.linkedin.com/v2/me",
+                    headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+                    timeout=self.config.timeout,
+                )
+                if me_resp.status_code == 200:
+                    me_data = self._json(me_resp)
+                    if me_data.get("id"):
+                        profile = {
+                            "sub": str(me_data.get("id") or ""),
+                            "name": f"{me_data.get('localizedFirstName', '')} {me_data.get('localizedLastName', '')}".strip() or "LinkedIn member",
+                            "email": "",
+                        }
+            except Exception:
+                pass
+
+        sub = str(profile.get("sub") or "").strip() or self.config.member_id
+        name = str(profile.get("name") or "LinkedIn member").strip()
+        email = str(profile.get("email") or "").strip()
+
         token["profile"] = {
-            "sub": str(profile.get("sub") or ""),
-            "name": str(profile.get("name") or "LinkedIn member"),
-            "email": str(profile.get("email") or ""),
+            "sub": sub,
+            "name": name,
+            "email": email,
         }
         if not token["profile"]["sub"]:
-            raise LinkedInError("LinkedIn profile response did not include a member ID")
+            raise LinkedInError(
+                "LinkedIn profile verification failed: member ID could not be retrieved. "
+                "Ensure 'Sign In with LinkedIn using OpenID Connect' is added in your LinkedIn App > Products, "
+                "or set LINKEDIN_MEMBER_ID."
+            )
         self.store.save(token)
         return token
 
@@ -327,11 +368,12 @@ class LinkedInClient:
 
         token = self._valid_token()
         profile = token.get("profile") if isinstance(token.get("profile"), dict) else {}
-        member_id = str(profile.get("sub") or "").strip()
+        member_id = str(profile.get("sub") or "").strip() or self.config.member_id
         if not member_id:
             raise LinkedInError("LinkedIn member ID is missing; reconnect LinkedIn")
+        author_urn = member_id if member_id.startswith("urn:li:") else f"urn:li:person:{member_id}"
         payload = {
-            "author": f"urn:li:person:{member_id}",
+            "author": author_urn,
             "lifecycleState": "PUBLISHED",
             "specificContent": {
                 "com.linkedin.ugc.ShareContent": {

@@ -36,6 +36,8 @@ services:
       - LINKEDIN_API_KEY=${LINKEDIN_API_KEY:-${LINKEDIN_CLIENT_ID:-}}
       - LINKEDIN_API_SECRET=${LINKEDIN_API_SECRET:-${LINKEDIN_CLIENT_SECRET:-}}
       - LINKEDIN_REDIRECT_URI=${LINKEDIN_REDIRECT_URI:-https://jarvis.littleheartsacademy.online/auth/linkedin/callback}
+      - LINKEDIN_SCOPES=${LINKEDIN_SCOPES:-openid profile email w_member_social}
+      - LINKEDIN_MEMBER_ID=${LINKEDIN_MEMBER_ID:-}
       - HERMES_API_BASE=${HERMES_API_BASE:-http://jarvis-hermes:8642}
       - HERMES_API_KEY=${HERMES_API_KEY:-jarvis-hermes-internal-token}
       - DIFY_API_KEY=${DIFY_API_KEY:-}

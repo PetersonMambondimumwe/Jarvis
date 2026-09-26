@@ -55,6 +55,38 @@ class LinkedInClientTests(unittest.TestCase):
         self.assertEqual(query["redirect_uri"], [self.config.redirect_uri])
         self.assertEqual(set(query["scope"][0].split()), {"openid", "profile", "email", "w_member_social"})
 
+    def test_authorization_url_supports_custom_scopes(self):
+        custom_cfg = LinkedInConfig(
+            "client-id",
+            "client-secret",
+            "https://jarvis.example.com/auth/linkedin/callback",
+            scopes="w_member_social",
+        )
+        url = LinkedInClient(custom_cfg).authorization_url("state-abc")
+        query = parse_qs(urlparse(url).query)
+        self.assertEqual(query["scope"], ["w_member_social"])
+
+    def test_exchange_fallback_with_configured_member_id(self):
+        custom_cfg = LinkedInConfig(
+            "client-id",
+            "client-secret",
+            "https://jarvis.example.com/auth/linkedin/callback",
+            scopes="w_member_social",
+            member_id="custom-sub-999",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "linkedin.enc"
+            session = FakeSession(
+                post_responses=[FakeResponse(200, {"access_token": "token-xyz", "expires_in": 3600})],
+                get_responses=[FakeResponse(403, {})],  # userinfo or me fails
+            )
+            store = LinkedInTokenStore(custom_cfg, path)
+            client = LinkedInClient(custom_cfg, session=session, store=store)
+
+            token = client.exchange_code("oauth-code")
+            self.assertEqual(token["profile"]["sub"], "custom-sub-999")
+            self.assertTrue(client.status()["connected"])
+
     def test_exchange_encrypts_token_and_verifies_profile(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "linkedin.enc"
