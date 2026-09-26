@@ -78,6 +78,7 @@ from actions.antigravity_bridge import antigravity_bridge
 from core.perception_engine     import PerceptionEngine
 from core.task_manager          import TaskManager
 from core.mcp_client            import MCPClientManager
+from core.honcho_memory         import HonchoMemory
 
 
 def get_base_dir():
@@ -731,6 +732,32 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "recall_memory",
+        "description": (
+            "Search Jarvis's Honcho long-term memory for relevant facts, prior "
+            "conversations, decisions, and project history. Use this whenever the "
+            "user asks what you remember or refers to something discussed previously."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {
+                    "type": "STRING",
+                    "description": "The specific person, project, decision, or past topic to recall."
+                }
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "memory_status",
+        "description": (
+            "Checks whether Jarvis's self-hosted Honcho long-term memory is "
+            "configured, authenticated, and reachable."
+        ),
+        "parameters": {"type": "OBJECT", "properties": {}}
+    },
+    {
         "name": "antigravity_bridge",
         "description": (
             "Delegates complex coding, full-stack software development, code refactoring, bug fixing, "
@@ -787,6 +814,7 @@ class JarvisLive:
         self._vision_last_time     = 0.0     # monotonic time of last screen_process call (cooldown guard)
         self._vision_busy          = False   # True while a vision capture/inject cycle is in flight
         self._interrupted          = False   # True while draining audio after user interrupt
+        self._pending_text_command = ""      # Text turns may not receive input transcription
         self.ui.on_text_command   = self._on_text_command
         self.ui.on_remote_clicked = self._make_remote_key
         self.ui.on_interrupt      = self.interrupt
@@ -802,6 +830,7 @@ class JarvisLive:
         self._db_cache_initialized = False
         # MCP Client Manager
         self._mcp = MCPClientManager()
+        self._honcho = HonchoMemory.from_config(API_CONFIG_PATH)
         # Tool registry — populated by _register_tools()
         self._tool_registry = ToolRegistry()
         self._register_tools()
@@ -822,6 +851,7 @@ class JarvisLive:
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
             return
+        self._pending_text_command = text.strip()
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
                 turns={"parts": [{"text": text}]},
@@ -895,6 +925,9 @@ class JarvisLive:
         parts = [time_ctx]
         if mem_str:
             parts.append(mem_str)
+        honcho_context = self._honcho.prompt_context(last_speech or "")
+        if honcho_context:
+            parts.append(honcho_context)
         parts.append(sys_prompt)
 
         mcp_declarations = self._mcp.get_function_declarations() if hasattr(self, "_mcp") else []
@@ -1000,6 +1033,14 @@ class JarvisLive:
         r.register("system_status",
             lambda args: get_system_status(),
             timeout=5)
+
+        r.register("recall_memory",
+            lambda args: self._honcho.recall(args.get("query", "")),
+            timeout=15)
+
+        r.register("memory_status",
+            lambda args: self._honcho.status(),
+            timeout=10)
 
         r.register("file_processor",
             lambda args: file_processor(
@@ -1137,6 +1178,10 @@ class JarvisLive:
                 if key and value:
                     update_memory({category: {key: {"value": value}}})
                     print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
+                    asyncio.create_task(asyncio.to_thread(
+                        self._honcho.remember,
+                        f"{category}/{key}: {value}",
+                    ))
                 if not self.ui.muted:
                     self.ui.set_state("LISTENING")
                 return types.FunctionResponse(
@@ -1290,6 +1335,9 @@ class JarvisLive:
                                 continue
 
                             full_in = " ".join(in_buf).strip()
+                            if not full_in and self._pending_text_command:
+                                full_in = self._pending_text_command
+                            self._pending_text_command = ""
                             if full_in:
                                 self.ui.write_log(f"You: {full_in}")
                                 if self._dashboard:
@@ -1312,6 +1360,13 @@ class JarvisLive:
                                         "ts": get_sast_now().isoformat(),
                                     }))
                             out_buf = []
+
+                            if full_in or full_out:
+                                asyncio.create_task(asyncio.to_thread(
+                                    self._honcho.record_turn,
+                                    full_in,
+                                    full_out,
+                                ))
 
                             # Vision injection: model finished tool-response turn → now send the image
                             if self._pending_vision and self.session:
@@ -1517,6 +1572,7 @@ class JarvisLive:
                         break
                     await asyncio.sleep(0.1)
                 if self.session:
+                    self._pending_text_command = text.strip()
                     await self.session.send_client_content(
                         turns={"parts": [{"text": text}]},
                         turn_complete=True,
