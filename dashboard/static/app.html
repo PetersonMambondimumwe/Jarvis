@@ -1184,7 +1184,10 @@
       };
       ws.onclose = async (e) => {
         const wasCurrent = _speakerWs === ws;
-        if (wasCurrent) _speakerWs = null;
+        if (wasCurrent) {
+          _speakerWs = null;
+          _stopAllAudio();
+        }
         if (!wasCurrent || e.code === 4002 || !_speakerDesired()) return;
         if (e.code === 4001) {
           const renewed = await _renewAuth();

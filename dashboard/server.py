@@ -554,6 +554,27 @@ class DashboardServer:
         for client_id in stale_ids:
             self._phone_speaker_clients.pop(client_id, None)
 
+    async def _register_phone_speaker(self, speaker_id: str, websocket: WebSocket) -> None:
+        """Give one visible PWA instance ownership of a speaker identity."""
+        previous = self._phone_speaker_clients.get(speaker_id)
+        self._phone_speaker_clients[speaker_id] = websocket
+        self._phone_speaker_ws_clients.add(websocket)
+        if previous is None or previous is websocket:
+            return
+
+        self._phone_speaker_ws_clients.discard(previous)
+        try:
+            await asyncio.wait_for(
+                previous.send_text(json.dumps({"type": "clear_audio"})),
+                timeout=0.2,
+            )
+        except Exception:
+            pass
+        try:
+            await previous.close(code=4002)
+        except Exception:
+            pass
+
     def clear_phone_audio_queue(self) -> int:
         """Drop stale microphone frames after a phone reconnects or disconnects."""
         dropped = 0
@@ -833,16 +854,7 @@ class DashboardServer:
                 speaker_id = f"token:{tok}"
 
             await websocket.accept()
-            previous = self._phone_speaker_clients.get(speaker_id)
-            if previous is not None and previous is not websocket:
-                self._phone_speaker_ws_clients.discard(previous)
-                try:
-                    await previous.close(code=4002)
-                except Exception:
-                    pass
-
-            self._phone_speaker_clients[speaker_id] = websocket
-            self._phone_speaker_ws_clients.add(websocket)
+            await self._register_phone_speaker(speaker_id, websocket)
             try:
                 while True:
                     await websocket.receive_text()
