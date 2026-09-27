@@ -129,35 +129,107 @@
     #viz-container {
       position: relative; width: min(66vw, 340px); height: min(66vw, 340px);
       pointer-events: none; border-radius: 50%;
-      background: radial-gradient(circle, rgba(5,5,8,0.75) 0%, rgba(5,5,8,0.42) 55%, rgba(5,5,8,0.08) 72%, transparent 100%);
+      background: radial-gradient(circle, rgba(34,211,238,0.14) 0%, rgba(14,165,233,0.08) 38%, rgba(5,5,8,0.72) 70%, transparent 100%);
+      box-shadow: 
+        0 0 30px rgba(34,211,238,0.22),
+        0 0 70px rgba(6,182,212,0.15),
+        inset 0 0 40px rgba(34,211,238,0.12);
       transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
     }
-    #viz-canvas {
-      width: 100%; height: 100%; display: block;
+
+    /* Ambient corona aura pulse */
+    #viz-energy-aura {
+      position: absolute; inset: -22px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(34,211,238,0.18) 0%, rgba(6,182,212,0.08) 45%, rgba(56,189,248,0.02) 70%, transparent 100%);
+      filter: blur(10px);
+      animation: auraBreathing 3.6s ease-in-out infinite;
+      pointer-events: none;
     }
-    /* Glow ring behind canvas */
+
+    /* Outer segmented tech ring (HUD arc markers) */
+    #viz-tech-ring-outer {
+      position: absolute; inset: -14px; border-radius: 50%;
+      border: 1px dashed rgba(34,211,238,0.35);
+      border-top-color: rgba(165,243,252,0.85);
+      border-bottom-color: rgba(56,189,248,0.75);
+      box-shadow: 0 0 16px rgba(34,211,238,0.15);
+      animation: spinClockwise 40s linear infinite;
+      pointer-events: none;
+    }
+    #viz-tech-ring-outer::before, #viz-tech-ring-outer::after {
+      content: ''; position: absolute; inset: -2px; border-radius: 50%;
+      border: 1.5px solid transparent;
+      border-left-color: rgba(34,211,238,0.8);
+      border-right-color: rgba(165,243,252,0.8);
+    }
+
+    /* Inner concentric counter-rotating ring */
+    #viz-tech-ring-inner {
+      position: absolute; inset: 4px; border-radius: 50%;
+      border: 1px dotted rgba(56,189,248,0.32);
+      border-top: 1.5px solid rgba(34,211,238,0.55);
+      border-bottom: 1.5px solid rgba(34,211,238,0.55);
+      animation: spinCounter 25s linear infinite;
+      pointer-events: none;
+    }
+
+    /* Arc reactor high-voltage glow ring */
     #viz-ring {
-      position: absolute; inset: -4px; border-radius: 50%;
-      border: 1.5px solid rgba(34,211,238,0.25);
-      box-shadow: 0 0 35px rgba(34,211,238,0.10), inset 0 0 30px rgba(34,211,238,0.05);
-      animation: ringPulse 4s ease-in-out infinite;
+      position: absolute; inset: -2px; border-radius: 50%;
+      border: 1.5px solid rgba(56,189,248,0.8);
+      box-shadow: 
+        0 0 16px rgba(34,211,238,0.6),
+        0 0 38px rgba(34,211,238,0.35),
+        0 0 75px rgba(6,182,212,0.2),
+        inset 0 0 25px rgba(34,211,238,0.28);
+      animation: ringPulse 3.5s ease-in-out infinite;
+      pointer-events: none;
     }
     @keyframes ringPulse {
-      0%, 100% { opacity: 0.7; box-shadow: 0 0 35px rgba(34,211,238,0.10), inset 0 0 30px rgba(34,211,238,0.05); }
-      50% { opacity: 1; box-shadow: 0 0 55px rgba(34,211,238,0.18), inset 0 0 45px rgba(34,211,238,0.08); }
+      0%, 100% {
+        opacity: 0.82;
+        border-color: rgba(56,189,248,0.7);
+        box-shadow: 0 0 16px rgba(34,211,238,0.55), 0 0 35px rgba(34,211,238,0.3), inset 0 0 22px rgba(34,211,238,0.22);
+      }
+      50% {
+        opacity: 1;
+        border-color: rgba(165,243,252,0.95);
+        box-shadow: 0 0 26px rgba(34,211,238,0.85), 0 0 65px rgba(6,182,212,0.5), inset 0 0 38px rgba(34,211,238,0.4);
+      }
     }
+    @keyframes spinClockwise {
+      0%   { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    @keyframes spinCounter {
+      0%   { transform: rotate(0deg); }
+      100% { transform: rotate(-360deg); }
+    }
+    @keyframes auraBreathing {
+      0%, 100% { opacity: 0.65; transform: scale(0.97); }
+      50%      { opacity: 1.0;  transform: scale(1.03); }
+    }
+
+    #viz-canvas {
+      width: 100%; height: 100%; display: block; position: relative; z-index: 2;
+    }
+
     /* Status text below viz */
     #viz-status {
-      position: absolute; bottom: -30px; left: 50%; transform: translateX(-50%);
-      font-size: 9.5px; letter-spacing: 3px; text-transform: uppercase;
-      color: rgba(34,211,238,0.6); font-weight: 700; white-space: nowrap;
-      text-shadow: 0 0 10px rgba(34,211,238,0.35);
-      pointer-events: none;
+      position: absolute; bottom: -34px; left: 50%; transform: translateX(-50%);
+      font-size: 10px; letter-spacing: 3.5px; text-transform: uppercase;
+      color: #38bdf8; font-weight: 800; white-space: nowrap;
+      text-shadow: 0 0 10px rgba(56,189,248,0.7), 0 0 22px rgba(34,211,238,0.35);
+      background: rgba(8,14,24,0.75);
+      padding: 3px 14px; border-radius: 99px;
+      border: 1px solid rgba(34,211,238,0.28);
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      pointer-events: none; z-index: 3;
     }
     /* TTS button positioned near bottom-right of viz */
     #tts-area {
-      position: absolute; bottom: -28px; right: -4px;
-      pointer-events: auto;
+      position: absolute; bottom: -32px; right: -4px;
+      pointer-events: auto; z-index: 4;
     }
 
     /* ── CONVERSATION LAYER (BEHIND & AROUND THE ORB) ── */
@@ -431,6 +503,9 @@
   <!-- HOLOGRAPHIC VISUALIZER -->
   <div id="viz-layer">
     <div id="viz-container">
+      <div id="viz-energy-aura"></div>
+      <div id="viz-tech-ring-outer"></div>
+      <div id="viz-tech-ring-inner"></div>
       <div id="viz-ring"></div>
       <canvas id="viz-canvas"></canvas>
       <div id="viz-status">Awaiting input</div>
@@ -461,9 +536,10 @@
       let particles = [];
       let _vizFrame;
       let _vizActive = true;
+      const _arcs = [];
 
-      const PARTICLE_COUNT = 120;
-      const ORBIT_PARTICLES = 40;
+      const PARTICLE_COUNT = 135;
+      const ORBIT_PARTICLES = 45;
 
       function resize() {
         const dpr = window.devicePixelRatio || 1;
@@ -483,16 +559,18 @@
         for (let i = 0; i < PARTICLE_COUNT; i++) {
           const theta = Math.random() * Math.PI * 2;
           const phi = Math.acos(2 * Math.random() - 1);
-          const r = Math.random() * 0.85;
+          const r = Math.random() * 0.88;
+          const isSpark = Math.random() < 0.16;
           particles.push({
             type: 'sphere',
             theta, phi, r,
-            speed: 0.0005 + Math.random() * 0.001,
-            drift: (Math.random() - 0.5) * 0.0003,
-            size: 1 + Math.random() * 2.5,
-            alpha: 0.3 + Math.random() * 0.5,
+            speed: (0.0006 + Math.random() * 0.0012) * (Math.random() < 0.5 ? 1 : -1),
+            drift: (Math.random() - 0.5) * 0.0004,
+            size: isSpark ? (1.8 + Math.random() * 2.2) : (1.1 + Math.random() * 2.2),
+            alpha: 0.45 + Math.random() * 0.5,
             pulse: Math.random() * Math.PI * 2,
-            pulseSpeed: 0.01 + Math.random() * 0.015,
+            pulseSpeed: 0.015 + Math.random() * 0.02,
+            isSpark,
           });
         }
         // Orbit ring particles
@@ -501,13 +579,13 @@
           particles.push({
             type: 'orbit',
             angle,
-            speed: 0.003 + Math.random() * 0.004,
-            size: 0.8 + Math.random() * 1.2,
-            alpha: 0.15 + Math.random() * 0.25,
-            orbitR: 0.92 + Math.random() * 0.06,
+            speed: 0.0035 + Math.random() * 0.004,
+            size: 1.0 + Math.random() * 1.5,
+            alpha: 0.25 + Math.random() * 0.45,
+            orbitR: 0.93 + Math.random() * 0.06,
             wobble: Math.random() * Math.PI * 2,
-            wobbleSpeed: 0.005 + Math.random() * 0.01,
-            wobbleAmp: 0.01 + Math.random() * 0.02,
+            wobbleSpeed: 0.006 + Math.random() * 0.012,
+            wobbleAmp: 0.012 + Math.random() * 0.025,
           });
         }
       }
@@ -517,19 +595,52 @@
         ctx2d.clearRect(0, 0, W, H);
 
         const isSpeaking = (window._activeAudioSources && window._activeAudioSources.length > 0) || false;
-        const speedMult = isSpeaking ? 2.2 : 1.0;
-        const pulseMult = isSpeaking ? 1.6 : 1.0;
+        const micElem = document.getElementById('mic-btn');
+        const isRecording = (micElem && micElem.classList.contains('recording')) || false;
+        const isExcited = isSpeaking || isRecording;
+        const speedMult = isSpeaking ? 2.5 : (isRecording ? 1.8 : 1.0);
+        const pulseMult = isSpeaking ? 2.2 : (isRecording ? 1.6 : 1.0);
 
-        // Subtle radial gradient background glow
-        const grad = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, radius * (isSpeaking ? 1.25 : 1.1));
-        grad.addColorStop(0, isSpeaking ? 'rgba(34, 211, 238, 0.06)' : 'rgba(34, 211, 238, 0.03)');
-        grad.addColorStop(0.5, 'rgba(34, 211, 238, 0.01)');
-        grad.addColorStop(1, 'transparent');
-        ctx2d.fillStyle = grad;
+        // Radiant Arc Reactor plasma core
+        const coreR = radius * (0.32 + (isExcited ? 0.09 : 0.03) * Math.sin(time * 0.0035));
+        const coreGrad = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, coreR);
+        coreGrad.addColorStop(0, isExcited ? 'rgba(255, 255, 255, 0.95)' : 'rgba(224, 247, 250, 0.75)');
+        coreGrad.addColorStop(0.25, isExcited ? 'rgba(56, 189, 248, 0.85)' : 'rgba(56, 189, 248, 0.52)');
+        coreGrad.addColorStop(0.6, isExcited ? 'rgba(6, 182, 212, 0.45)' : 'rgba(6, 182, 212, 0.24)');
+        coreGrad.addColorStop(0.85, 'rgba(14, 116, 144, 0.1)');
+        coreGrad.addColorStop(1, 'transparent');
+        ctx2d.fillStyle = coreGrad;
         ctx2d.beginPath();
-        ctx2d.arc(cx, cy, radius * 1.1, 0, Math.PI * 2);
+        ctx2d.arc(cx, cy, coreR, 0, Math.PI * 2);
         ctx2d.fill();
 
+        // Ambient outer energy aura
+        const outerGrad = ctx2d.createRadialGradient(cx, cy, radius * 0.15, cx, cy, radius * (isExcited ? 1.28 : 1.14));
+        outerGrad.addColorStop(0, isExcited ? 'rgba(34, 211, 238, 0.18)' : 'rgba(34, 211, 238, 0.09)');
+        outerGrad.addColorStop(0.45, isExcited ? 'rgba(14, 165, 233, 0.08)' : 'rgba(14, 165, 233, 0.035)');
+        outerGrad.addColorStop(0.8, isExcited ? 'rgba(6, 182, 212, 0.03)' : 'rgba(6, 182, 212, 0.01)');
+        outerGrad.addColorStop(1, 'transparent');
+        ctx2d.fillStyle = outerGrad;
+        ctx2d.beginPath();
+        ctx2d.arc(cx, cy, radius * (isExcited ? 1.28 : 1.14), 0, Math.PI * 2);
+        ctx2d.fill();
+
+        // 3D holographic equator ring
+        ctx2d.save();
+        ctx2d.translate(cx, cy);
+        ctx2d.rotate(0.25 + Math.sin(time * 0.0008) * 0.05);
+        ctx2d.scale(1, 0.32);
+        ctx2d.beginPath();
+        ctx2d.arc(0, 0, radius * 1.01, 0, Math.PI * 2);
+        ctx2d.strokeStyle = isExcited ? 'rgba(165, 243, 252, 0.45)' : 'rgba(34, 211, 238, 0.22)';
+        ctx2d.lineWidth = 1.4;
+        ctx2d.setLineDash([4, 10, 16, 8]);
+        ctx2d.stroke();
+        ctx2d.setLineDash([]);
+        ctx2d.restore();
+
+        // Project and render sphere particles + synaptic neural links
+        const projected = [];
         for (const p of particles) {
           if (p.type === 'sphere') {
             p.theta += p.speed * speedMult;
@@ -542,27 +653,65 @@
             const y3d = p.r * sinPhi * Math.sin(p.theta);
             const z3d = p.r * cosPhi;
 
-            // Simple perspective
-            const scale = 1 / (1.8 - z3d * 0.4);
+            const scale = 1 / (1.75 - z3d * 0.45);
             const px = cx + x3d * radius * scale;
             const py = cy + y3d * radius * scale;
             const depth = (z3d + 1) / 2; // 0 to 1
-            const a = p.alpha * (0.3 + depth * 0.7) * (0.7 + 0.3 * Math.sin(p.pulse));
-            const s = p.size * scale * (0.8 + 0.2 * Math.sin(p.pulse));
+            const a = p.alpha * (0.35 + depth * 0.65) * (0.7 + 0.3 * Math.sin(p.pulse));
+            const s = p.size * scale * (0.85 + 0.2 * Math.sin(p.pulse));
 
-            ctx2d.beginPath();
-            ctx2d.arc(px, py, s, 0, Math.PI * 2);
-            ctx2d.fillStyle = `rgba(34, 211, 238, ${a})`;
-            ctx2d.fill();
+            projected.push({ px, py, s, a, depth, isSpark: p.isSpark, scale });
+          }
+        }
 
-            // Glow for brighter particles
-            if (a > 0.35) {
-              ctx2d.beginPath();
-              ctx2d.arc(px, py, s * 3, 0, Math.PI * 2);
-              ctx2d.fillStyle = `rgba(34, 211, 238, ${a * 0.08})`;
-              ctx2d.fill();
+        // Synaptic neural links between nearby particle nodes
+        const maxDist = radius * 0.26;
+        const pLen = projected.length;
+        for (let i = 0; i < pLen; i++) {
+          const p1 = projected[i];
+          const checkLimit = Math.min(i + 12, pLen);
+          for (let j = i + 1; j < checkLimit; j++) {
+            const p2 = projected[j];
+            const dx = p1.px - p2.px;
+            const dy = p1.py - p2.py;
+            const dist = Math.hypot(dx, dy);
+            if (dist < maxDist) {
+              const lineAlpha = (1 - dist / maxDist) * 0.28 * Math.min(p1.a, p2.a);
+              if (lineAlpha > 0.02) {
+                ctx2d.beginPath();
+                ctx2d.moveTo(p1.px, p1.py);
+                ctx2d.lineTo(p2.px, p2.py);
+                ctx2d.strokeStyle = isExcited
+                  ? `rgba(165, 243, 252, ${lineAlpha * 1.5})`
+                  : `rgba(34, 211, 238, ${lineAlpha})`;
+                ctx2d.lineWidth = (p1.scale + p2.scale) * 0.4;
+                ctx2d.stroke();
+              }
             }
-          } else if (p.type === 'orbit') {
+          }
+        }
+
+        // Render particles
+        for (const p of projected) {
+          ctx2d.beginPath();
+          ctx2d.arc(p.px, p.py, p.s, 0, Math.PI * 2);
+          ctx2d.fillStyle = p.isSpark
+            ? `rgba(240, 253, 250, ${Math.min(1, p.a * 1.3)})`
+            : `rgba(34, 211, 238, ${p.a})`;
+          ctx2d.fill();
+
+          // Radiant halo for brighter particles
+          if (p.a > 0.3) {
+            ctx2d.beginPath();
+            ctx2d.arc(p.px, p.py, p.s * 2.6, 0, Math.PI * 2);
+            ctx2d.fillStyle = `rgba(56, 189, 248, ${p.a * 0.22})`;
+            ctx2d.fill();
+          }
+        }
+
+        // Orbit particles
+        for (const p of particles) {
+          if (p.type === 'orbit') {
             p.angle += p.speed * speedMult;
             p.wobble += p.wobbleSpeed * pulseMult;
             const oR = radius * (p.orbitR + Math.sin(p.wobble) * p.wobbleAmp);
@@ -571,9 +720,45 @@
 
             ctx2d.beginPath();
             ctx2d.arc(px, py, p.size, 0, Math.PI * 2);
-            ctx2d.fillStyle = `rgba(34, 211, 238, ${p.alpha * (0.6 + 0.4 * Math.sin(p.wobble))})`;
+            ctx2d.fillStyle = `rgba(56, 189, 248, ${p.alpha * (0.65 + 0.35 * Math.sin(p.wobble))})`;
+            ctx2d.fill();
+
+            // Subtle trail / glow on orbiters
+            ctx2d.beginPath();
+            ctx2d.arc(px, py, p.size * 2.2, 0, Math.PI * 2);
+            ctx2d.fillStyle = `rgba(34, 211, 238, ${p.alpha * 0.16})`;
             ctx2d.fill();
           }
+        }
+
+        // Random micro energy lightning arcs
+        if (Math.random() < (isExcited ? 0.22 : 0.04) && projected.length > 2) {
+          const idxA = Math.floor(Math.random() * projected.length);
+          const idxB = (idxA + 1 + Math.floor(Math.random() * 8)) % projected.length;
+          const pA = projected[idxA];
+          const pB = projected[idxB];
+          _arcs.push({
+            x1: pA.px, y1: pA.py,
+            x2: pB.px, y2: pB.py,
+            life: 1.0,
+            decay: 0.18 + Math.random() * 0.12
+          });
+        }
+
+        // Draw and update micro energy arcs
+        for (let i = _arcs.length - 1; i >= 0; i--) {
+          const arc = _arcs[i];
+          const mx = (arc.x1 + arc.x2) / 2 + (Math.random() - 0.5) * 12;
+          const my = (arc.y1 + arc.y2) / 2 + (Math.random() - 0.5) * 12;
+          ctx2d.beginPath();
+          ctx2d.moveTo(arc.x1, arc.y1);
+          ctx2d.lineTo(mx, my);
+          ctx2d.lineTo(arc.x2, arc.y2);
+          ctx2d.strokeStyle = `rgba(224, 247, 250, ${arc.life * 0.8})`;
+          ctx2d.lineWidth = 1.2;
+          ctx2d.stroke();
+          arc.life -= arc.decay;
+          if (arc.life <= 0) _arcs.splice(i, 1);
         }
 
         _vizFrame = requestAnimationFrame(draw);
