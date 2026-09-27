@@ -31,13 +31,43 @@ def _base_dir() -> Path:
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 
+def _read_env_vars() -> dict[str, str]:
+    env_vars: dict[str, str] = {}
+    for candidate in [
+        _base_dir() / ".env",
+        Path.cwd() / ".env",
+        Path("/root/jarvis/.env"),
+        Path("/app/.env"),
+    ]:
+        if candidate.is_file():
+            try:
+                for line in candidate.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip("'\"")
+                    if k and k not in env_vars:
+                        env_vars[k] = v
+            except Exception:
+                pass
+    return env_vars
+
+
 def _get_config() -> dict:
+    cfg = {}
     try:
-        return json.loads(
+        cfg = json.loads(
             (_base_dir() / "config" / "api_keys.json").read_text(encoding="utf-8")
         )
     except Exception:
-        return {}
+        cfg = {}
+    for k, v in _read_env_vars().items():
+        if k not in cfg:
+            cfg[k] = v
+    return cfg
+
 
 def _get_os() -> str:
     return _get_config().get("os_system", "windows").lower()
@@ -398,6 +428,85 @@ def _send_email_via_power_automate(
         return f"[Email] Failed to trigger flow: {exc}"
 
 
+def _send_email_smtp(
+    to: str,
+    name: str,
+    subject: str,
+    message: str,
+    sender_name: str = "Jarvis",
+) -> str | None:
+    """Send branded email directly via SMTP if configured in environment or config."""
+    import os
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    cfg = _get_config()
+    smtp_email = (
+        os.environ.get("SMTP_EMAIL")
+        or os.environ.get("SMTP_USER")
+        or cfg.get("SMTP_EMAIL")
+        or cfg.get("SMTP_USER")
+        or cfg.get("smtp_email")
+        or cfg.get("smtp_user")
+        or ""
+    ).strip()
+    smtp_password = (
+        os.environ.get("SMTP_PASSWORD")
+        or os.environ.get("SMTP_PASS")
+        or cfg.get("SMTP_PASSWORD")
+        or cfg.get("SMTP_PASS")
+        or cfg.get("smtp_password")
+        or cfg.get("smtp_pass")
+        or ""
+    ).strip()
+    smtp_host = (
+        os.environ.get("SMTP_HOST")
+        or cfg.get("SMTP_HOST")
+        or cfg.get("smtp_host", "smtp.gmail.com")
+        or "smtp.gmail.com"
+    ).strip()
+    try:
+        smtp_port = int(
+            os.environ.get("SMTP_PORT")
+            or cfg.get("SMTP_PORT")
+            or cfg.get("smtp_port", 587)
+        )
+    except (ValueError, TypeError):
+        smtp_port = 587
+
+    if not smtp_email or not smtp_password:
+        return None
+
+    # Clean password of any internal whitespace
+    clean_password = smtp_password.replace(" ", "")
+
+    subj = subject or f"Message from {sender_name}"
+    html_body = _EMAIL_HTML_TEMPLATE.format(
+        name=name or "there",
+        message=message.replace("\n", "<br>"),
+        sender_name=sender_name,
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subj
+    msg["From"] = f"{sender_name} <{smtp_email}>"
+    msg["To"] = to
+
+    msg.attach(MIMEText(message, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
+            server.starttls()
+            server.login(smtp_email, clean_password)
+            server.send_message(msg)
+        return f"[OK] Email sent to {to} via SMTP. Subject: \"{subj}\"."
+    except Exception as exc:
+        print(f"[Email] SMTP error: {exc}")
+        return f"[Email] SMTP delivery failed: {exc}"
+
+
 def _resolve_platform(platform_str: str):
     key = platform_str.lower().strip()
     for keywords, handler in _PLATFORM_MAP:
@@ -427,18 +536,30 @@ def send_message(
     if player:
         player.write_log(f"[msg] {platform} → {receiver}")
 
-    # ── Email via Power Automate ──────────────────────────────────────────
+    # ── Email (SMTP with Power Automate fallback) ─────────────────────────
     if platform in ("email", "mail", "e-mail"):
         name        = params.get("name", "").strip()
         subject     = params.get("subject", "").strip()
         sender_name = params.get("sender_name", "Jarvis").strip()
-        result = _send_email_via_power_automate(
+
+        # Prefer direct SMTP if credentials are configured
+        result = _send_email_smtp(
             to=receiver,
             name=name,
             subject=subject,
             message=message_text,
             sender_name=sender_name,
         )
+        if result is None:
+            # Fall back to Power Automate HTTP trigger if SMTP is not set
+            result = _send_email_via_power_automate(
+                to=receiver,
+                name=name,
+                subject=subject,
+                message=message_text,
+                sender_name=sender_name,
+            )
+
         print(f"[SendMessage] {'OK' if 'OK' in result or 'sent' in result.lower() else 'ERR'} {result}")
         if player:
             player.write_log(f"[email] {result}")

@@ -1,7 +1,7 @@
 # Hermes Execution Agent Configuration
 # Dedicated task execution agent for Sir Peterson and Jarvis.
-# Holds execution authority over GitHub repositories (GITHUB_TOKEN / GITHUB_PAT)
-# and Vercel projects (VERCEL_TOKEN / VERCEL_API_TOKEN).
+# Holds execution authority over GitHub repositories (GITHUB_TOKEN / GITHUB_PAT),
+# Vercel projects (VERCEL_TOKEN / VERCEL_API_TOKEN), and Email delivery (SMTP_EMAIL / SMTP_PASSWORD).
 
 model:
   default: claude-haiku-4-5

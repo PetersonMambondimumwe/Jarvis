@@ -30,6 +30,11 @@ services:
       HERMES_YOLO_MODE: "1"
       HERMES_APPROVALS_MODE: "off"
       HERMES_AUTO_APPROVE: "true"
+      SMTP_EMAIL: ${SMTP_EMAIL:-u19094290@tuks.co.za}
+      SMTP_USER: ${SMTP_USER:-${SMTP_EMAIL:-u19094290@tuks.co.za}}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
     expose:
       - "8642"
     volumes:
