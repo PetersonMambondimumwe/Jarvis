@@ -47,8 +47,8 @@ class WhatsAppClientTests(unittest.TestCase):
         with self.assertRaises(WhatsAppError):
             normalize_phone_number("123")  # too short
 
-    def test_send_message_success(self):
-        cfg = WhatsAppConfig(phone_number_id="10987654321", token="fake-token")
+    def test_send_text_success(self):
+        cfg = WhatsAppConfig(phone_number_id="10987654321", token="fake-token", use_template=False)
         session = FakeSession([
             FakeResponse(200, {
                 "messaging_product": "whatsapp",
@@ -57,11 +57,12 @@ class WhatsAppClientTests(unittest.TestCase):
             })
         ])
         client = WhatsAppClient(cfg, session=session)
-        res = client.send_message("+27 71 234 5678", "Good afternoon Sir Peterson")
+        res = client.send_text("+27 71 234 5678", "Good afternoon Sir Peterson")
 
         self.assertTrue(res["ok"])
         self.assertEqual(res["message_id"], "wamid.HBgLMTIz")
         self.assertEqual(res["recipient"], "27712345678")
+        self.assertEqual(res["mode"], "text")
 
         self.assertEqual(len(session.calls), 1)
         method, url, kwargs = session.calls[0]
@@ -69,10 +70,59 @@ class WhatsAppClientTests(unittest.TestCase):
         self.assertIn("10987654321/messages", url)
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer fake-token")
         self.assertEqual(kwargs["json"]["to"], "27712345678")
+        self.assertEqual(kwargs["json"]["type"], "text")
         self.assertEqual(kwargs["json"]["text"]["body"], "Good afternoon Sir Peterson")
 
+    def test_send_template_success(self):
+        cfg = WhatsAppConfig(
+            phone_number_id="10987654321",
+            token="fake-token",
+            template_name="jarvis_notification",
+            template_lang="en",
+        )
+        session = FakeSession([
+            FakeResponse(200, {
+                "messaging_product": "whatsapp",
+                "contacts": [{"input": "27712345678", "wa_id": "27712345678"}],
+                "messages": [{"id": "wamid.TEMPLATE_MSG_123"}]
+            })
+        ])
+        client = WhatsAppClient(cfg, session=session)
+        res = client.send_template("+27 71 234 5678", "Good day, Greetings from Jarvis")
+
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["message_id"], "wamid.TEMPLATE_MSG_123")
+        self.assertEqual(res["recipient"], "27712345678")
+        self.assertEqual(res["mode"], "template")
+        self.assertEqual(res["template_name"], "jarvis_notification")
+
+        self.assertEqual(len(session.calls), 1)
+        method, url, kwargs = session.calls[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(kwargs["json"]["type"], "template")
+        self.assertEqual(kwargs["json"]["template"]["name"], "jarvis_notification")
+        self.assertEqual(kwargs["json"]["template"]["language"]["code"], "en")
+        params = kwargs["json"]["template"]["components"][0]["parameters"]
+        # Redundant leading "Good day, " is trimmed so it doesn't duplicate in the template body
+        self.assertEqual(params[0]["text"], "Greetings from Jarvis")
+
+    def test_send_message_defaults_to_template(self):
+        cfg = WhatsAppConfig(phone_number_id="10987654321", token="fake-token", use_template=True)
+        session = FakeSession([
+            FakeResponse(200, {
+                "messaging_product": "whatsapp",
+                "messages": [{"id": "wamid.DEF_TMPL"}]
+            })
+        ])
+        client = WhatsAppClient(cfg, session=session)
+        res = client.send_message("+27 71 234 5678", "System update completed.")
+
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["mode"], "template")
+        self.assertEqual(session.calls[0][2]["json"]["type"], "template")
+
     def test_send_message_meta_api_error(self):
-        cfg = WhatsAppConfig(phone_number_id="10987654321", token="fake-token")
+        cfg = WhatsAppConfig(phone_number_id="10987654321", token="fake-token", use_template=False)
         session = FakeSession([
             FakeResponse(400, {
                 "error": {
