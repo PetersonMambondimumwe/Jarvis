@@ -1112,23 +1112,88 @@
 
     connectWS();
 
+    // ── Screen Wake Lock & Audio Keep-Alive (Always-On HUD) ───────────────────
+    let _wakeLockSentinel = null;
+    let _keepAliveSource  = null;
+
+    async function _requestWakeLock() {
+      if (!('wakeLock' in navigator)) return;
+      if (document.visibilityState !== 'visible') return;
+      if (_wakeLockSentinel && !_wakeLockSentinel.released) return;
+      try {
+        _wakeLockSentinel = await navigator.wakeLock.request('screen');
+        _wakeLockSentinel.addEventListener('release', () => {
+          if (document.visibilityState === 'visible') {
+            setTimeout(_requestWakeLock, 500);
+          }
+        });
+      } catch (_) {}
+    }
+
+    function _ensureKeepAlive(ctx) {
+      if (_keepAliveSource || !ctx) return;
+      try {
+        const silentBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+        const ch = silentBuf.getChannelData(0);
+        for (let i = 0; i < ch.length; i += 64) {
+          ch[i] = 1e-6; // imperceptible non-zero DC pulse prevents mobile WebAudio auto-suspend
+        }
+        const src = ctx.createBufferSource();
+        src.buffer = silentBuf;
+        src.loop = true;
+        const gain = ctx.createGain();
+        gain.gain.value = 0.001;
+        src.connect(gain);
+        gain.connect(ctx.destination);
+        src.start(0);
+        _keepAliveSource = src;
+      } catch (_) {}
+
+      if ('mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: 'JARVIS — Live Interface',
+            artist: 'Stark HUD',
+            album: 'JARVIS OS',
+          });
+          navigator.mediaSession.playbackState = 'playing';
+        } catch (_) {}
+      }
+    }
+
+    _requestWakeLock();
+    setInterval(() => {
+      if (document.visibilityState === 'visible') _requestWakeLock();
+      if (_audioCtx && _audioCtx.state === 'suspended') {
+        try { _audioCtx.resume(); } catch (_) {}
+      }
+    }, 10000);
+
     window.addEventListener('online', () => connectWS());
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         _refreshViewportShell();
         setTimeout(_refreshViewportShell, 250);
+        _requestWakeLock();
+        if (_audioCtx && _audioCtx.state === 'suspended') {
+          try { _audioCtx.resume(); } catch (_) {}
+        }
         if (!_ws || _ws.readyState !== WebSocket.OPEN) {
           connectWS();
         }
         _connectSpeaker();
       } else {
-        _closeSpeaker();
-        _stopVoice();
+        // Keep speaker and voice streams alive even if screen dims or briefly backgrounds
+        if (_audioCtx && _audioCtx.state === 'suspended') {
+          try { _audioCtx.resume(); } catch (_) {}
+        }
       }
     });
-    window.addEventListener('pagehide', () => {
-      _closeSpeaker();
-      _stopVoice();
+    window.addEventListener('focus', () => {
+      _requestWakeLock();
+      if (_audioCtx && _audioCtx.state === 'suspended') {
+        try { _audioCtx.resume(); } catch (_) {}
+      }
     });
     let _ttsEnabled = true;
     function toggleTTS() {
@@ -1162,9 +1227,11 @@
       if (s === 'active') {
         pill.className = 'pill on'; stTxt.textContent = 'Active'; wake.classList.remove('show');
         if (vizLabel) vizLabel('Active');
+        _requestWakeLock();
       } else if (s === 'starting') {
         pill.className = 'pill'; stTxt.textContent = 'Starting'; wake.classList.remove('show');
         if (vizLabel) vizLabel('Initializing');
+        _requestWakeLock();
       } else if (s === 'offline') {
         pill.className = 'pill'; stTxt.textContent = 'Offline'; wake.classList.add('show');
         if (vizLabel) vizLabel('Offline');
@@ -1362,10 +1429,20 @@
       inp.value = '';
       _stopAllAudio();
       append('user', txt, requestId);
+      _requestWakeLock();
       _ensureAudioCtx();
       _connectSpeaker();
       const enc  = _encrypt(txt);
       const body = enc ? { enc, request_id: requestId } : { text: txt, request_id: requestId };
+
+      // Fast path: dispatch directly over persistent WebSocket if open (zero HTTP handshake latency)
+      if (_ws && _ws.readyState === WebSocket.OPEN) {
+        try {
+          _ws.send(JSON.stringify(Object.assign({ type: 'command' }, body)));
+          return;
+        } catch (_) {}
+      }
+
       _textSendInFlight = true;
       if (sendBtn) sendBtn.disabled = true;
       try {
@@ -1421,9 +1498,9 @@
       micBtn.classList.remove('recording');
     }
 
-    const VOICE_SEND_SAMPLES = 1600;
+    const VOICE_SEND_SAMPLES = 640; // 40ms frames at 16kHz (reduced from 100ms for lower uplink latency)
     const MAX_VOICE_WS_BUFFER = 256 * 1024;
-    const JITTER_BUFFER_SECONDS = 0.08;
+    const JITTER_BUFFER_SECONDS = 0.025; // 25ms initial jitter buffer (reduced from 80ms for faster speech start)
     let _activeAudioSources = [];
     window._activeAudioSources = _activeAudioSources;
     let _audioProcessChain = Promise.resolve();
@@ -1522,11 +1599,12 @@
     function _ensureAudioCtx() {
       if (!_audioCtx) {
         const AC = window.AudioContext || window.webkitAudioContext;
-        _audioCtx = new AC();
+        _audioCtx = new AC({ latencyHint: 'interactive' });
       }
       if (_audioCtx.state === 'suspended') {
         try { _audioCtx.resume(); } catch (_) {}
       }
+      _ensureKeepAlive(_audioCtx);
       return _audioCtx;
     }
 
@@ -1585,6 +1663,7 @@
 
         try {
           if (window.speechSynthesis) window.speechSynthesis.cancel();
+          _requestWakeLock();
           const ctx = _ensureAudioCtx();
           if (ctx.state === 'suspended') await ctx.resume();
           if (gen !== _playbackGeneration) return;
@@ -1648,8 +1727,7 @@
     function _speakerDesired() {
       return Boolean(
         _ttsEnabled &&
-        _authToken &&
-        document.visibilityState === 'visible'
+        _authToken
       );
     }
 
@@ -1691,7 +1769,7 @@
           const renewed = await _renewAuth();
           if (!renewed) return;
         }
-        const delay = Math.min(1000 * Math.pow(1.4, _speakerReconnectAttempts), 6000);
+        const delay = Math.min(600 * Math.pow(1.4, _speakerReconnectAttempts), 4000);
         _speakerReconnectAttempts++;
         _speakerReconnectTimer = setTimeout(_connectSpeaker, delay);
       };
@@ -1701,12 +1779,14 @@
       _speakerWs = ws;
     }
 
-    document.addEventListener('click', () => { _ensureAudioCtx(); }, { once: false });
-    document.addEventListener('touchstart', () => { _ensureAudioCtx(); }, { once: false });
+    document.addEventListener('click', () => { _requestWakeLock(); _ensureAudioCtx(); }, { once: false });
+    document.addEventListener('touchstart', () => { _requestWakeLock(); _ensureAudioCtx(); }, { once: false });
+    document.addEventListener('keydown', () => { _requestWakeLock(); _ensureAudioCtx(); }, { once: false });
 
     async function doMic() {
       if (_voiceWs) { _stopVoice(); return; }
 
+      _requestWakeLock();
       const ctx = _ensureAudioCtx();
       if (ctx.state === 'suspended') {
         try { await ctx.resume(); } catch (_) {}

@@ -1048,6 +1048,28 @@ class JarvisLive:
         self.ui.write_log(f"ERR: {tool_name} — {short}")
         self.speak(f"Sir, {tool_name} encountered an error. {short}")
 
+    @staticmethod
+    def _keep_screen_awake(enable: bool = True) -> None:
+        """Prevent OS screen timeout and system sleep while JARVIS is active."""
+        try:
+            if _platform.system() == "Windows":
+                import ctypes
+                ES_CONTINUOUS       = 0x80000000
+                ES_SYSTEM_REQUIRED  = 0x00000001
+                ES_DISPLAY_REQUIRED = 0x00000002
+                flags = (ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED) if enable else ES_CONTINUOUS
+                ctypes.windll.kernel32.SetThreadExecutionState(flags)
+            elif _platform.system() == "Darwin" and enable:
+                # Best-effort non-blocking caffeinate tied to current PID
+                if not getattr(JarvisLive, "_caffeinate_proc", None):
+                    JarvisLive._caffeinate_proc = _subprocess.Popen(
+                        ["caffeinate", "-d", "-i", "-w", str(os.getpid())],
+                        stdout=_subprocess.DEVNULL,
+                        stderr=_subprocess.DEVNULL,
+                    )
+        except Exception:
+            pass
+
     def _build_config(self) -> types.LiveConnectConfig:
         from core.time_util import get_sast_now, get_sast_time_str
 
@@ -1078,7 +1100,7 @@ class JarvisLive:
         mcp_declarations = self._mcp.get_function_declarations() if hasattr(self, "_mcp") else []
         all_declarations = list(TOOL_DECLARATIONS) + mcp_declarations
 
-        return types.LiveConnectConfig(
+        cfg_kwargs = dict(
             response_modalities=["AUDIO"],
             output_audio_transcription={},
             input_audio_transcription={},
@@ -1093,6 +1115,29 @@ class JarvisLive:
                 )
             ),
         )
+
+        # Low-latency server-side VAD: cut post-speech silence wait from ~1000ms down to 350ms
+        try:
+            if hasattr(types, "RealtimeInputConfig") and hasattr(types, "AutomaticActivityDetection"):
+                aad_kwargs = {"silence_duration_ms": 350, "prefix_padding_ms": 100}
+                if hasattr(types, "StartSensitivity"):
+                    aad_kwargs["start_of_speech_sensitivity"] = types.StartSensitivity.START_SENSITIVITY_HIGH
+                if hasattr(types, "EndSensitivity"):
+                    aad_kwargs["end_of_speech_sensitivity"] = types.EndSensitivity.END_SENSITIVITY_HIGH
+                cfg_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
+                    automatic_activity_detection=types.AutomaticActivityDetection(**aad_kwargs)
+                )
+        except Exception:
+            pass
+
+        # Minimize internal thinking delay before emitting audio tokens on native-audio models
+        try:
+            if hasattr(types, "ThinkingConfig") and "thinking_config" in getattr(types.LiveConnectConfig, "model_fields", {}):
+                cfg_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+        except Exception:
+            pass
+
+        return types.LiveConnectConfig(**cfg_kwargs)
 
     # ── Tool registration ─────────────────────────────────────────────────────────
 
@@ -1421,7 +1466,32 @@ class JarvisLive:
         self.hermes_task_manager.start_polling()
         while True:
             msg = await self.out_queue.get()
-            await self.session.send_realtime_input(media=msg)
+            # Coalesce up to 4 contiguous PCM frames if backlog accumulated while network send was in flight
+            if (
+                isinstance(msg, dict)
+                and msg.get("mime_type") == "audio/pcm"
+                and isinstance(msg.get("data"), (bytes, bytearray))
+                and not self.out_queue.empty()
+            ):
+                parts = [bytes(msg["data"])]
+                for _ in range(3):
+                    if self.out_queue.empty():
+                        break
+                    try:
+                        nxt = self.out_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    if isinstance(nxt, dict) and nxt.get("mime_type") == "audio/pcm":
+                        parts.append(bytes(nxt["data"]))
+                    else:
+                        await self.session.send_realtime_input(media={"data": b"".join(parts), "mime_type": "audio/pcm"})
+                        parts = []
+                        await self.session.send_realtime_input(media=nxt)
+                        break
+                if parts:
+                    await self.session.send_realtime_input(media={"data": b"".join(parts), "mime_type": "audio/pcm"})
+            else:
+                await self.session.send_realtime_input(media=msg)
 
     async def _listen_audio(self):
         if getattr(self, "headless", False):
@@ -1602,11 +1672,13 @@ class JarvisLive:
                                 asyncio.create_task(_cam_close())
 
                     if response.tool_call:
-                        fn_responses = []
-                        for fc in response.tool_call.function_calls:
+                        fcs = list(response.tool_call.function_calls)
+                        for fc in fcs:
                             print(f"[JARVIS] 📞 {fc.name}")
-                            fr = await self._execute_tool(fc)
-                            fn_responses.append(fr)
+                        if len(fcs) == 1:
+                            fn_responses = [await self._execute_tool(fcs[0])]
+                        else:
+                            fn_responses = list(await asyncio.gather(*(self._execute_tool(fc) for fc in fcs)))
                         await self.session.send_tool_response(
                             function_responses=fn_responses
                         )
@@ -1632,12 +1704,13 @@ class JarvisLive:
                 print(f"[JARVIS] Local soundcard unavailable: {e}")
                 stream = None
 
+        burst_chunks = 0
         try:
             while True:
                 try:
                     chunk = await asyncio.wait_for(
                         self.audio_in_queue.get(),
-                        timeout=0.1
+                        timeout=0.015
                     )
                 except asyncio.TimeoutError:
                     if (
@@ -1647,15 +1720,13 @@ class JarvisLive:
                     ):
                         self.set_speaking(False)
                         self._turn_done_event.clear()
+                        burst_chunks = 0
                     continue
                 self.set_speaking(True)
 
-                # Broadcast audio chunk to phone dashboard clients sequentially
+                # Dispatch audio chunk to phone speaker clients concurrently without blocking local soundcard
                 if self._dashboard:
-                    try:
-                        await self._dashboard.broadcast_audio(chunk)
-                    except Exception:
-                        pass
+                    asyncio.create_task(self._dashboard.broadcast_audio(chunk))
 
                 if stream:
                     try:
@@ -1663,10 +1734,12 @@ class JarvisLive:
                     except (RuntimeError, asyncio.CancelledError):
                         break   # executor shutting down — exit cleanly
                 else:
-                    # In headless server mode, pace audio broadcast slightly ahead of real time (70% of duration)
-                    # so the client's jitter buffer stays comfortably filled and never starves on network jitter.
-                    dur = len(chunk) / (RECEIVE_SAMPLE_RATE * 2)
-                    await asyncio.sleep(dur * 0.70)
+                    # In headless server mode, send the first 3 chunks (300ms) with zero delay to fill
+                    # the client's WebAudio buffer immediately, then pace smoothly at 65% of duration.
+                    burst_chunks += 1
+                    if burst_chunks > 3:
+                        dur = len(chunk) / (RECEIVE_SAMPLE_RATE * 2)
+                        await asyncio.sleep(dur * 0.65)
         except Exception as e:
             print(f"[JARVIS] ❌ Play: {e}")
             raise
@@ -1685,9 +1758,10 @@ class JarvisLive:
 
 
     async def _run_system_monitor(self) -> None:
-        """Background task: voice alerts when metrics exceed thresholds."""
+        """Background task: voice alerts when metrics exceed thresholds & refresh OS wake lock."""
         while True:
             await asyncio.sleep(10)
+            self._keep_screen_awake(True)
             alert = await asyncio.to_thread(self._sys_monitor.check)
             if alert and self.session:
                 try:
@@ -1764,7 +1838,7 @@ class JarvisLive:
         while True:
             try:
                 command = await asyncio.wait_for(
-                    self._dashboard._command_queue.get(), timeout=0.5
+                    self._dashboard._command_queue.get(), timeout=0.15
                 )
                 if isinstance(command, dict):
                     text = str(command.get("text") or "").strip()
@@ -1774,11 +1848,11 @@ class JarvisLive:
                     request_id = ""
                 if not text:
                     continue
-                # Wait up to 8s for session to become ready after a wake
-                for _ in range(80):
+                # Wait up to 8s for session to become ready after a wake (20ms poll for low latency)
+                for _ in range(400):
                     if self.session:
                         break
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.02)
                 if self.session:
                     self.clear_audio_queue()
                     if self._dashboard:
@@ -1839,6 +1913,7 @@ class JarvisLive:
 
     async def run(self):
         self._loop = asyncio.get_event_loop()
+        self._keep_screen_awake(True)
 
         # Initialize MCP Client (discover servers and tools)
         try:

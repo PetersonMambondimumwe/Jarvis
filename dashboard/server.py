@@ -520,41 +520,47 @@ class DashboardServer:
         self._history.append(msg)
         if len(self._history) > 300:
             self._history = self._history[-300:]
-        dead: set[WebSocket] = set()
-        for ws in list(self._clients):
-            try:
-                await ws.send_json(msg)
-            except Exception:
-                dead.add(ws)
-        self._clients -= dead
+        clients = list(self._clients)
+        if not clients:
+            return
+        results = await asyncio.gather(
+            *(ws.send_json(msg) for ws in clients),
+            return_exceptions=True,
+        )
+        dead = {ws for ws, res in zip(clients, results) if isinstance(res, BaseException)}
+        if dead:
+            self._clients -= dead
 
     async def broadcast_audio(self, pcm_chunk: bytes) -> None:
-        """Send raw PCM audio chunks to connected phone audio websockets."""
-        dead: set[WebSocket] = set()
-        # Prefer dedicated speaker websockets; only fall back to audio_ws if no speakers exist
+        """Send raw PCM audio chunks concurrently to connected phone audio websockets."""
         targets = list(self._phone_speaker_ws_clients) if self._phone_speaker_ws_clients else list(self._phone_audio_ws_clients)
-        for ws in targets:
-            try:
-                await asyncio.wait_for(ws.send_bytes(pcm_chunk), timeout=0.2)
-            except Exception:
-                dead.add(ws)
-        self._phone_audio_ws_clients -= dead
-        for ws in dead:
-            self._discard_phone_speaker(ws)
+        if not targets:
+            return
+        results = await asyncio.gather(
+            *(asyncio.wait_for(ws.send_bytes(pcm_chunk), timeout=0.2) for ws in targets),
+            return_exceptions=True,
+        )
+        dead = {ws for ws, res in zip(targets, results) if isinstance(res, BaseException)}
+        if dead:
+            self._phone_audio_ws_clients -= dead
+            for ws in dead:
+                self._discard_phone_speaker(ws)
 
     async def broadcast_audio_control(self, action: str) -> None:
-        """Send audio control messages (e.g. clear/stop) to connected speaker websockets."""
-        msg = json.dumps({"type": "clear_audio" if action == "clear" else action})
-        dead: set[WebSocket] = set()
+        """Send audio control messages (e.g. clear/stop) concurrently to connected speaker websockets."""
         targets = list(self._phone_speaker_ws_clients) if self._phone_speaker_ws_clients else list(self._phone_audio_ws_clients)
-        for ws in targets:
-            try:
-                await asyncio.wait_for(ws.send_text(msg), timeout=0.2)
-            except Exception:
-                dead.add(ws)
-        self._phone_audio_ws_clients -= dead
-        for ws in dead:
-            self._discard_phone_speaker(ws)
+        if not targets:
+            return
+        msg = json.dumps({"type": "clear_audio" if action == "clear" else action})
+        results = await asyncio.gather(
+            *(asyncio.wait_for(ws.send_text(msg), timeout=0.2) for ws in targets),
+            return_exceptions=True,
+        )
+        dead = {ws for ws, res in zip(targets, results) if isinstance(res, BaseException)}
+        if dead:
+            self._phone_audio_ws_clients -= dead
+            for ws in dead:
+                self._discard_phone_speaker(ws)
 
     def _discard_phone_speaker(self, websocket: WebSocket) -> None:
         self._phone_speaker_ws_clients.discard(websocket)

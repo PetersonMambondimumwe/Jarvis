@@ -256,13 +256,23 @@ class HonchoMemory:
         return self._run(operation, "Long-term memory is currently unavailable.")
 
     def prompt_context(self, query: str = "") -> str:
+        if not self.enabled:
+            return ""
+        import time as _t
+        now = _t.monotonic()
+        cache = getattr(self, "_prompt_ctx_cache", None)
+        if cache and cache[0] == query and (now - cache[1]) < 60.0:
+            return cache[2]
         recalled = self.recall(query)
         if recalled in {
             "Long-term memory is currently unavailable.",
             "No relevant long-term memory was found.",
         }:
-            return ""
-        return f"[HONCHO LONG-TERM MEMORY]\n{recalled[:3500]}\n"
+            res = ""
+        else:
+            res = f"[HONCHO LONG-TERM MEMORY]\n{recalled[:2500]}\n"
+        self._prompt_ctx_cache = (query, now, res)
+        return res
 
     def status(self) -> str:
         if not self.enabled:

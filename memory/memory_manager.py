@@ -40,7 +40,7 @@ _last_load_time = 0
 
 def load_memory() -> dict:
     global _cached_memory, _last_load_time
-    if _cached_memory and (datetime.now().timestamp() - _last_load_time < 5):
+    if _cached_memory and (datetime.now().timestamp() - _last_load_time < 300):
         return _cached_memory
         
     if not MEMORY_PATH.exists():

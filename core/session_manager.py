@@ -53,7 +53,7 @@ async def run_session_loop(
             jarvis.ui.set_state("THINKING")
             if jarvis._dashboard:
                 await jarvis._dashboard.broadcast({"type": "status", "state": "starting"})
-            config = jarvis._build_config()
+            config = await asyncio.to_thread(jarvis._build_config)
 
             # Fresh client on every reconnect — avoids stale HTTP session state.
             client = genai.Client(
