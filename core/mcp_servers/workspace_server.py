@@ -508,7 +508,7 @@ def email_list_inbox(
     unread_only: bool = False,
     folder: str = "INBOX",
 ) -> str:
-    """List recent emails in the user's inbox via IMAP.
+    """List recent emails in the user's inbox via IMAP (including a body preview for the newest emails).
 
     Parameters:
       - limit: Maximum number of emails to list (default: 10, max: 30)
@@ -528,19 +528,28 @@ def email_list_inbox(
             recent_uids = list(reversed(uids[-limit:]))
             lines = [f"=== {folder} ({len(uids)} matching, showing latest {len(recent_uids)}) ===\n"]
 
-            for uid_bytes in recent_uids:
+            for idx, uid_bytes in enumerate(recent_uids):
                 uid_str = uid_bytes.decode("ascii", errors="replace")
-                st, msg_data = conn.uid("fetch", uid_bytes, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")
+                # Fetch full message for the top 3 newest emails so Jarvis has a snippet ready immediately
+                fetch_spec = "(BODY.PEEK[])" if idx < 3 else "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])"
+                st, msg_data = conn.uid("fetch", uid_bytes, fetch_spec)
                 if st != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
                     continue
-                hdr_msg = email.message_from_bytes(msg_data[0][1])
-                subj = _decode_mime_header(hdr_msg.get("Subject")) or "(No Subject)"
-                sender = _decode_mime_header(hdr_msg.get("From")) or "Unknown"
-                date_str = _decode_mime_header(hdr_msg.get("Date")) or ""
-                lines.append(
+                msg_obj = email.message_from_bytes(msg_data[0][1])
+                subj = _decode_mime_header(msg_obj.get("Subject")) or "(No Subject)"
+                sender = _decode_mime_header(msg_obj.get("From")) or "Unknown"
+                date_str = _decode_mime_header(msg_obj.get("Date")) or ""
+                entry = (
                     f"• ID `{uid_str}` — **{subj}**\n"
                     f"  From: {sender} | Date: {date_str}"
                 )
+                if idx < 3:
+                    snippet = re.sub(r"\s+", " ", _extract_email_body(msg_obj)).strip()
+                    if len(snippet) > 260:
+                        snippet = snippet[:260] + "…"
+                    if snippet:
+                        entry += f"\n  Preview: {snippet}"
+                lines.append(entry)
             return "\n".join(lines)
         finally:
             try:
@@ -603,21 +612,41 @@ def email_search(
         return f"[Email] Search failed: {exc}"
 
 
+def _resolve_uid_bytes(conn: imaplib.IMAP4_SSL, email_id: str, unread_only: bool = False) -> Optional[bytes]:
+    """Resolve an email_id string (or 'latest'/'last'/'newest') to an IMAP UID bytes token."""
+    cleaned = (email_id or "").strip().lower()
+    if not cleaned or cleaned in ("latest", "last", "newest", "recent"):
+        criterion = "UNSEEN" if unread_only else "ALL"
+        status, data = conn.uid("search", None, criterion)
+        if status != "OK" or not data or not data[0]:
+            return None
+        uids = data[0].split()
+        return uids[-1] if uids else None
+    return email_id.strip().encode("ascii", errors="ignore")
+
+
 @server.tool()
-def email_read_message(email_id: str, folder: str = "INBOX") -> str:
-    """Read the full content and headers of a specific email by its ID (UID).
+def email_read_message(
+    email_id: str = "latest",
+    unread_only: bool = False,
+    folder: str = "INBOX",
+) -> str:
+    """Read the full content and headers of the latest email (or a specific email by its ID/UID).
 
     Parameters:
-      - email_id: The email UID returned by email_list_inbox or email_search
+      - email_id: Pass 'latest' (default) to immediately read the most recent email in the inbox, or pass a specific UID from email_list_inbox / email_search
+      - unread_only: When email_id='latest', set True to read the latest unread email
       - folder: Mailbox folder (default: 'INBOX')
     """
-    uid = (email_id or "").strip()
-    if not uid:
-        return "Please provide 'email_id' to read."
     try:
         conn = _open_imap(folder=folder)
         try:
-            status, msg_data = conn.uid("fetch", uid.encode("ascii"), "(BODY.PEEK[])")
+            uid_bytes = _resolve_uid_bytes(conn, email_id, unread_only=unread_only)
+            if not uid_bytes:
+                return f"No {'unread ' if unread_only else ''}emails found in {folder}."
+
+            uid = uid_bytes.decode("ascii", errors="replace")
+            status, msg_data = conn.uid("fetch", uid_bytes, "(BODY.PEEK[])")
             if status != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
                 return f"Email ID '{uid}' not found in {folder}."
 
@@ -647,36 +676,39 @@ def email_read_message(email_id: str, folder: str = "INBOX") -> str:
             except Exception:
                 pass
     except Exception as exc:
-        return f"[Email] Error reading email '{uid}': {exc}"
+        return f"[Email] Error reading email '{email_id}': {exc}"
 
 
 @server.tool()
 def email_reply(
-    email_id: str,
     reply_body: str,
+    email_id: str = "latest",
     reply_all: bool = False,
     folder: str = "INBOX",
     sender_name: str = "Jarvis",
 ) -> str:
-    """Reply to an existing email thread by its ID (UID), preserving subject and Message-ID threading.
+    """Reply to the latest email (or a specific email by its ID/UID), preserving subject and Message-ID threading.
 
     Parameters:
-      - email_id: The email UID to reply to
       - reply_body: Text content of the reply
+      - email_id: 'latest' (default, replies to the most recent email) or a specific email UID
       - reply_all: If True, also CC original recipients
       - folder: Mailbox folder containing the original email (default: 'INBOX')
       - sender_name: Display name for sender (default: 'Jarvis')
     """
-    uid = (email_id or "").strip()
-    if not uid or not reply_body.strip():
-        return "Please provide both 'email_id' and 'reply_body'."
+    if not reply_body.strip():
+        return "Please provide 'reply_body'."
 
     try:
         conn = _open_imap(folder=folder)
         try:
+            uid_bytes = _resolve_uid_bytes(conn, email_id, unread_only=False)
+            if not uid_bytes:
+                return f"No emails found in {folder} to reply to."
+            uid = uid_bytes.decode("ascii", errors="replace")
             status, msg_data = conn.uid(
                 "fetch",
-                uid.encode("ascii"),
+                uid_bytes,
                 "(BODY.PEEK[HEADER.FIELDS (FROM REPLY-TO TO CC SUBJECT MESSAGE-ID REFERENCES)])",
             )
             if status != "OK" or not msg_data or not isinstance(msg_data[0], tuple):

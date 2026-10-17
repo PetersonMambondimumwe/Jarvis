@@ -155,6 +155,26 @@ class TestWorkspaceMCP(unittest.TestCase):
             smtp_instance.send_message.assert_called_once()
             self.assertIn("Email sent to sir@example.com via SMTP", res)
 
+    def test_workspace_email_read_latest_message(self):
+        raw_email = (
+            b"From: Dean <dean@up.ac.za>\r\n"
+            b"To: Sir Peterson <u19094290@tuks.co.za>\r\n"
+            b"Subject: Research Grant Approved\r\n"
+            b"Date: Sat, 17 Oct 2026 10:00:00 +0200\r\n"
+            b"Content-Type: text/plain; charset=utf-8\r\n\r\n"
+            b"Congratulations Sir Peterson, your grant has been approved."
+        )
+        mock_imap = MagicMock()
+        mock_imap.uid.side_effect = [
+            ("OK", [b"101 102 105"]),
+            ("OK", [(b"105 (BODY[] {200}", raw_email)]),
+        ]
+        with patch.object(workspace_server, "_open_imap", return_value=mock_imap):
+            res = workspace_server.email_read_message(email_id="latest")
+            self.assertIn("Research Grant Approved", res)
+            self.assertIn("dean@up.ac.za", res)
+            self.assertIn("Congratulations Sir Peterson, your grant has been approved.", res)
+
     def test_mcp_client_discovers_workspace_server(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_file = Path(tmp_dir) / "mcp_servers.json"
