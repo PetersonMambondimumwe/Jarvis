@@ -224,8 +224,72 @@ class WakeWordListener:
         except Exception as exc:
             pass
 
+    @staticmethod
+    def launch_pwa_window(pwa_url: Optional[str] = None) -> bool:
+        """Launch the JARVIS PWA in a standalone app window (Chrome/Edge --app mode or default browser)."""
+        import shutil
+        import webbrowser
+
+        pin = os.environ.get("JARVIS_PIN", "JARVIS").strip() or "JARVIS"
+        base_url = (
+            pwa_url
+            or os.environ.get("JARVIS_PWA_URL", "").strip()
+            or f"http://127.0.0.1:8000/auto-login?key={pin}&voice=1"
+        )
+        if "voice=" not in base_url:
+            sep = "&" if "?" in base_url else "?"
+            base_url = f"{base_url}{sep}voice=1"
+
+        # Prefer launching in chromeless standalone PWA window (--app=...)
+        candidates: list[str] = []
+        if sys.platform == "win32":
+            prog_files = [
+                os.environ.get("PROGRAMFILES", r"C:\Program Files"),
+                os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"),
+                os.environ.get("LOCALAPPDATA", ""),
+            ]
+            rel_paths = [
+                r"Google\Chrome\Application\chrome.exe",
+                r"Microsoft\Edge\Application\msedge.exe",
+                r"BraveSoftware\Brave-Browser\Application\brave.exe",
+            ]
+            for root in prog_files:
+                if not root:
+                    continue
+                for rel in rel_paths:
+                    full = os.path.join(root, rel)
+                    if os.path.isfile(full):
+                        candidates.append(full)
+        else:
+            for bin_name in ("google-chrome", "chromium", "microsoft-edge", "brave-browser"):
+                found = shutil.which(bin_name)
+                if found:
+                    candidates.append(found)
+
+        for browser_bin in candidates:
+            try:
+                subprocess.Popen(
+                    [browser_bin, f"--app={base_url}", "--autoplay-policy=no-user-gesture-required"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                print(f"[WakeWord] Launched JARVIS PWA window: {base_url}")
+                return True
+            except Exception:
+                continue
+
+        try:
+            webbrowser.open(base_url, new=1, autoraise=True)
+            print(f"[WakeWord] Opened JARVIS PWA in browser: {base_url}")
+            return True
+        except Exception as e:
+            print(f"[WakeWord] Could not open browser: {e}")
+            return False
+
     def trigger_wake(self) -> None:
-        """Execute wake actions: direct callback, dashboard wake signal, or process launcher."""
+        """Execute wake actions: direct callback, dashboard wake signal, PWA window launch, or process launcher."""
+        import urllib.request
+
         # 1. In-process UI callback
         if self.on_wake:
             try:
@@ -233,19 +297,30 @@ class WakeWordListener:
             except Exception as e:
                 print(f"[WakeWord] Direct callback error: {e}")
 
-        # 2. HTTP Signal to running Dashboard
+        # 2. HTTP Signal to running Dashboard (wakes connected PWA tabs via WebSocket)
         notified = False
+        target_api = os.environ.get("JARVIS_SERVER_URL", "http://127.0.0.1:8000").rstrip("/")
+        pin = os.environ.get("JARVIS_PIN", "JARVIS").strip() or "JARVIS"
         try:
-            resp = requests.post("http://127.0.0.1:8000/api/wake", timeout=1.0)
-            if resp.status_code == 200:
-                print("[WakeWord] Sent wake signal to running JARVIS session.")
-                notified = True
+            req = urllib.request.Request(
+                f"{target_api}/api/wake",
+                method="POST",
+                headers={"Authorization": f"Bearer {pin}"},
+            )
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                if resp.status == 200:
+                    print("[WakeWord] Sent wake signal to running JARVIS session.")
+                    notified = True
         except Exception:
             pass
 
-        # 3. If JARVIS is not currently active -> launch main.py
-        if not notified and not self.on_wake and self.auto_launch_main:
-            print("[WakeWord] JARVIS is closed. Launching main.py...")
+        # 3. Launch / Focus the JARVIS PWA window with ?voice=1
+        if os.environ.get("JARVIS_WAKE_OPEN_PWA", "1") != "0":
+            self.launch_pwa_window()
+
+        # 4. If local JARVIS is not currently active -> launch main.py
+        if not notified and not self.on_wake and self.auto_launch_main and "127.0.0.1" in target_api:
+            print("[WakeWord] Local JARVIS is closed. Launching main.py...")
             main_script = BASE_DIR / "main.py"
             python_exe = sys.executable
             try:
@@ -256,9 +331,17 @@ class WakeWordListener:
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="JARVIS Always-On Wake Word Daemon & PWA Launcher")
+    parser.add_argument("--pwa-url", default="", help="Remote Dokploy or local JARVIS PWA URL to launch on wake")
+    args = parser.parse_args()
+    if args.pwa_url:
+        os.environ["JARVIS_PWA_URL"] = args.pwa_url
+        os.environ["JARVIS_SERVER_URL"] = args.pwa_url.split("/auto-login")[0].rstrip("/")
+
     print("=== JARVIS Standby Wake Word Daemon ===")
-    print("Speak 'Jarvis wake up' or 'Hey Jarvis' to launch JARVIS.")
-    listener = WakeWordListener()
+    print("Speak 'Jarvis wake up' or 'Hey Jarvis' to launch the JARVIS PWA.")
+    listener = WakeWordListener(auto_launch_main=not bool(args.pwa_url))
     listener.start()
     try:
         while True:

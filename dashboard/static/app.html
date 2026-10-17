@@ -653,6 +653,7 @@
       <div class="install-tabs">
         <button id="tab-btn-ios" class="tab-btn active" onclick="showInstallTab('ios')">iOS // Safari</button>
         <button id="tab-btn-android" class="tab-btn" onclick="showInstallTab('android')">Android // Chrome</button>
+        <button id="tab-btn-voice" class="tab-btn" onclick="showInstallTab('voice')">Voice Launch</button>
       </div>
 
       <div id="tab-content-ios" class="tab-content active">
@@ -685,6 +686,22 @@
         </div>
         <button id="native-install-btn" class="btn btn-send" onclick="triggerNativeInstall()" style="width:100%;margin-top:14px;padding:12px;font-size:12px;display:none;">Deploy Directly Now</button>
       </div>
+
+      <div id="tab-content-voice" class="tab-content">
+        <div class="install-step">
+          <div class="step-num">1</div>
+          <div class="step-txt"><strong>In-App Always-Listening:</strong> Keep <span class="badge-icon">WAKE: ARMED</span> active in the top bar. Say <strong>"Jarvis wake up"</strong> or <strong>"Hey Jarvis"</strong> anytime to engage live voice hands-free.</div>
+        </div>
+        <div class="install-step">
+          <div class="step-num">2</div>
+          <div class="step-txt"><strong>Launch When App Is Closed (Phone):</strong> Create an iOS Shortcut or Android Routine named <strong>"Jarvis wake up"</strong> with action <strong>Open URL</strong> set to your Voice Launch URL below.</div>
+        </div>
+        <div class="install-step">
+          <div class="step-num">3</div>
+          <div class="step-txt"><strong>Launch When App Is Closed (PC):</strong> Run <code>python core/wake_word.py</code> in the background to launch the standalone PWA window whenever you say <strong>"Jarvis wake up"</strong>.</div>
+        </div>
+        <button class="btn btn-send" onclick="copyVoiceLaunchUrl()" style="width:100%;margin-top:10px;padding:12px;font-size:12px;">Copy Voice Launch URL</button>
+      </div>
     </div>
   </div>
 
@@ -694,6 +711,7 @@
       <span class="logo-tag">MK-XLVIII</span>
     </div>
     <div class="pill" id="pill"><span class="dot"></span><span id="st">Connecting</span></div>
+    <button class="pill on" id="wake-sentinel-btn" onclick="toggleWakeSentinel()" style="cursor:pointer;" title="Always-Listening Wake Word Sentinel ('Jarvis wake up')"><span class="dot"></span><span id="wake-sentinel-txt">WAKE: ARMED</span></button>
     <button class="pill" id="linkedin-btn" onclick="connectLinkedIn()" style="cursor:pointer;font-weight:700;font-size:11px;min-width:34px;justify-content:center;" title="Connect LinkedIn" aria-label="Connect LinkedIn">IN</button>
     <button class="pill" id="install-btn" onclick="openInstallModal()" style="display:inline-flex;cursor:pointer;background:rgba(0,240,255,0.10);border:1px solid rgba(0,240,255,0.35);color:var(--accent);font-weight:700;" title="Install JARVIS App">DEPLOY HUD</button>
     <div class="enc-badge" id="enc">AES-256</div>
@@ -1159,8 +1177,26 @@
     function showInstallTab(type) {
       document.getElementById('tab-btn-ios').classList.toggle('active', type === 'ios');
       document.getElementById('tab-btn-android').classList.toggle('active', type === 'android');
+      const vb = document.getElementById('tab-btn-voice');
+      const vc = document.getElementById('tab-content-voice');
+      if (vb) vb.classList.toggle('active', type === 'voice');
       document.getElementById('tab-content-ios').classList.toggle('active', type === 'ios');
       document.getElementById('tab-content-android').classList.toggle('active', type === 'android');
+      if (vc) vc.classList.toggle('active', type === 'voice');
+    }
+
+    function copyVoiceLaunchUrl() {
+      const key = sessionStorage.getItem('jarvis_key') || 'JARVIS';
+      const launchUrl = `${location.origin}/auto-login?key=${encodeURIComponent(key)}&voice=1`;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(launchUrl).then(() => {
+          toast('Voice Launch URL Copied');
+        }).catch(() => {
+          prompt('Copy Voice Launch URL:', launchUrl);
+        });
+      } else {
+        prompt('Copy Voice Launch URL:', launchUrl);
+      }
     }
 
     function triggerNativeInstall() {
@@ -1375,7 +1411,12 @@
           append(m.speaker, m.text, m.request_id || '');
         }
         if (m.type === 'status')        setStatus(m.state);
-        if (m.type === 'wake')          sys('Wake word detected — engaging core…');
+        if (m.type === 'wake') {
+          sys('WAKE WORD DETECTED — ENGAGING COMBAT CORE…');
+          if (typeof _triggerWakeActivation === 'function') {
+            _triggerWakeActivation('');
+          }
+        }
         if (m.type === 'sys')           sys(m.text);
         if (m.type === 'file_received') _onFileReceived(m);
       };
@@ -2063,6 +2104,7 @@
     async function doMic() {
       if (_voiceWs) { _stopVoice(); return; }
 
+      _stopWakeSentinel();
       _requestWakeLock();
       const ctx = _ensureAudioCtx();
       if (ctx.state === 'suspended') {
@@ -2073,6 +2115,7 @@
 
       if (!navigator.mediaDevices?.getUserMedia) {
         _showVoiceSetup();
+        _scheduleWakeSentinelRestart(1200);
         return;
       }
       let stream;
@@ -2090,6 +2133,7 @@
         sys(e.name === 'NotAllowedError'
           ? 'Microphone access denied — authorize audio input in browser settings.'
           : 'Mic fault: ' + e.message);
+        _scheduleWakeSentinelRestart(1500);
         return;
       }
 
@@ -2197,7 +2241,243 @@
       }
       _micIdle();
       if (window._vizSetStatus) window._vizSetStatus('Combat Core Online');
+      _scheduleWakeSentinelRestart(450);
     }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       ALWAYS-LISTENING WAKE WORD SENTINEL ("JARVIS WAKE UP" / "HEY JARVIS")
+       ═══════════════════════════════════════════════════════════════════════ */
+    const _WAKE_PHRASES = [
+      'jarvis wake up',
+      'wake up jarvis',
+      'hey jarvis',
+      'hi jarvis',
+      'hello jarvis',
+      'yo jarvis',
+      'ok jarvis',
+      'okay jarvis',
+      'jarvis online',
+      'wake up',
+      'jarvis'
+    ];
+
+    let _wakeSentinelEnabled = localStorage.getItem('jarvis_wake_sentinel') !== '0';
+    let _wakeRec = null;
+    let _wakeRestartTimer = null;
+    let _lastWakeTriggerMs = 0;
+
+    function _playWakeChime() {
+      try {
+        const ctx = _ensureAudioCtx();
+        const now = ctx.currentTime;
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc1.type = 'triangle';
+        osc2.type = 'sine';
+        osc1.frequency.setValueAtTime(520, now);
+        osc1.frequency.exponentialRampToValueAtTime(1040, now + 0.14);
+        osc2.frequency.setValueAtTime(780, now);
+        osc2.frequency.exponentialRampToValueAtTime(1560, now + 0.16);
+        gain.gain.setValueAtTime(0.001, now);
+        gain.gain.exponentialRampToValueAtTime(0.16, now + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(ctx.destination);
+        osc1.start(now);
+        osc2.start(now);
+        osc1.stop(now + 0.25);
+        osc2.stop(now + 0.25);
+      } catch (_) {}
+    }
+
+    function _syncWakeSentinelUI(activeListening) {
+      const btn = document.getElementById('wake-sentinel-btn');
+      const txt = document.getElementById('wake-sentinel-txt');
+      const hudState = document.getElementById('hud-wake-state');
+      if (!btn || !txt) return;
+      if (_wakeSentinelEnabled) {
+        btn.className = 'pill on';
+        txt.textContent = activeListening ? 'WAKE: LISTENING' : 'WAKE: ARMED';
+        if (hudState) hudState.textContent = activeListening ? 'WAKE SENTINEL LIVE' : 'SENTINEL ARMED';
+      } else {
+        btn.className = 'pill';
+        txt.textContent = 'WAKE: OFF';
+        if (hudState) hudState.textContent = 'SENTINEL STANDBY';
+      }
+    }
+
+    function _stopWakeSentinel() {
+      clearTimeout(_wakeRestartTimer);
+      _wakeRestartTimer = null;
+      if (_wakeRec) {
+        const r = _wakeRec;
+        _wakeRec = null;
+        r.onresult = null;
+        r.onend = null;
+        r.onerror = null;
+        try { r.abort(); } catch (_) {}
+      }
+      _syncWakeSentinelUI(false);
+    }
+
+    function _scheduleWakeSentinelRestart(delayMs = 500) {
+      clearTimeout(_wakeRestartTimer);
+      if (!_wakeSentinelEnabled || _voiceWs) return;
+      _wakeRestartTimer = setTimeout(_startWakeSentinel, delayMs);
+    }
+
+    function _triggerWakeActivation(trailingCommand = '') {
+      const now = Date.now();
+      if (now - _lastWakeTriggerMs < 2200) return;
+      _lastWakeTriggerMs = now;
+
+      _stopWakeSentinel();
+      _playWakeChime();
+
+      try { window.focus(); } catch (_) {}
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'WAKE_PWA',
+          notify: document.visibilityState !== 'visible',
+          command: trailingCommand || '',
+        });
+      }
+
+      if (trailingCommand && trailingCommand.length > 2) {
+        const inp = document.getElementById('inp');
+        if (inp) {
+          inp.value = trailingCommand;
+          doSend();
+        }
+      }
+
+      if (!_voiceWs) {
+        doMic();
+      }
+    }
+
+    function _startWakeSentinel() {
+      if (!_wakeSentinelEnabled || _voiceWs || _wakeRec) return;
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) {
+        _syncWakeSentinelUI(false);
+        return;
+      }
+
+      try {
+        const rec = new SR();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+        rec.maxAlternatives = 1;
+
+        rec.onstart = () => {
+          _syncWakeSentinelUI(true);
+        };
+
+        rec.onresult = (event) => {
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = (event.results[i][0].transcript || '').toLowerCase().trim();
+            if (!transcript) continue;
+
+            for (const phrase of _WAKE_PHRASES) {
+              const idx = transcript.indexOf(phrase);
+              if (idx !== -1) {
+                const after = transcript.slice(idx + phrase.length).replace(/^[,.\s:-]+/, '').trim();
+                const isFinal = event.results[i].isFinal;
+                if (!after || isFinal) {
+                  _triggerWakeActivation(isFinal ? after : '');
+                  return;
+                }
+              }
+            }
+          }
+        };
+
+        rec.onerror = (e) => {
+          _wakeRec = null;
+          if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+            _syncWakeSentinelUI(false);
+            return;
+          }
+          _scheduleWakeSentinelRestart(900);
+        };
+
+        rec.onend = () => {
+          _wakeRec = null;
+          if (_wakeSentinelEnabled && !_voiceWs) {
+            _scheduleWakeSentinelRestart(300);
+          } else {
+            _syncWakeSentinelUI(false);
+          }
+        };
+
+        _wakeRec = rec;
+        rec.start();
+      } catch (_) {
+        _wakeRec = null;
+        _scheduleWakeSentinelRestart(1200);
+      }
+    }
+
+    function toggleWakeSentinel() {
+      _wakeSentinelEnabled = !_wakeSentinelEnabled;
+      try {
+        localStorage.setItem('jarvis_wake_sentinel', _wakeSentinelEnabled ? '1' : '0');
+      } catch (_) {}
+      if (_wakeSentinelEnabled) {
+        if ('Notification' in window && Notification.permission === 'default') {
+          Notification.requestPermission().catch(() => {});
+        }
+        toast('Wake Sentinel Armed — Say "Jarvis wake up"');
+        _startWakeSentinel();
+      } else {
+        _stopWakeSentinel();
+        toast('Wake Sentinel Disarmed');
+      }
+    }
+
+    // Listen for Service Worker WAKE_PWA / ACTIVATE_VOICE messages
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', (e) => {
+        const d = e.data || {};
+        if (d.type === 'ACTIVATE_VOICE') {
+          _playWakeChime();
+          if (d.command) {
+            const inp = document.getElementById('inp');
+            if (inp) { inp.value = d.command; doSend(); }
+          }
+          if (!_voiceWs) doMic();
+        }
+      });
+    }
+
+    // Handle ?voice=1 & ?cmd=... deep-links (from Siri Shortcut, Android Routine, or PC wake_word.py)
+    window.addEventListener('load', () => {
+      _syncWakeSentinelUI(false);
+      const params = new URLSearchParams(location.search);
+      const wantVoice = params.get('voice') === '1' || params.get('voice') === 'true';
+      const initCmd = (params.get('cmd') || '').trim();
+
+      if (wantVoice || initCmd) {
+        try { history.replaceState({}, '', '/'); } catch (_) {}
+        setTimeout(() => {
+          _triggerWakeActivation(initCmd);
+        }, 350);
+      } else if (_wakeSentinelEnabled) {
+        setTimeout(_startWakeSentinel, 600);
+      }
+    });
+
+    // Also start Wake Sentinel on first user interaction if browser blocked cold-start mic
+    document.addEventListener('click', () => {
+      if (_wakeSentinelEnabled && !_voiceWs && !_wakeRec) _startWakeSentinel();
+    }, { passive: true });
+    document.addEventListener('touchstart', () => {
+      if (_wakeSentinelEnabled && !_voiceWs && !_wakeRec) _startWakeSentinel();
+    }, { passive: true });
   </script>
 </body>
 </html>

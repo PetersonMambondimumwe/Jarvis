@@ -1000,8 +1000,8 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
                                 status_code=401)
 
         @app.get("/auto-login")
-        async def auto_login(key: str = ""):
-            """QR code target — validates one-time key or master PIN, creates session, redirects phone."""
+        async def auto_login(key: str = "", voice: str = ""):
+            """QR code / voice shortcut target — validates key or master PIN, creates session, redirects phone."""
             import os
             key = key.strip().upper()
             now = time.time()
@@ -1011,9 +1011,9 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
                 return HTMLResponse("""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width">
 <style>
-  body{background:#07090f;color:#dde3ed;font-family:sans-serif;
+  body{background:#04060A;color:#dde3ed;font-family:sans-serif;
        display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}
-  h2{color:#f87171;margin-bottom:12px}p{color:#5e6a7e;font-size:14px}
+  h2{color:#ff2a3c;margin-bottom:12px}p{color:#8499b2;font-size:14px}
 </style></head>
 <body><div><h2>Link Expired</h2>
 <p>Press <strong style="color:#dde3ed">Remote Control</strong> in JARVIS to get a new QR code.</p>
@@ -1035,20 +1035,21 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
             asyncio.create_task(self.broadcast(
                 {"type": "sys", "text": "Remote connection established via QR code."}
             ))
+            target_url = "/?voice=1" if str(voice).strip() in ("1", "true", "yes") else "/"
 
             return HTMLResponse(f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width">
 <style>
-  body{{background:#07090f;color:#dde3ed;font-family:sans-serif;
+  body{{background:#04060A;color:#dde3ed;font-family:sans-serif;
        display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}}
-  p{{color:#5e6a7e;font-size:14px}}
+  p{{color:#8499b2;font-size:14px}}
 </style></head>
 <body>
 <script>
   sessionStorage.setItem('jarvis_token','{tok}');
   sessionStorage.setItem('jarvis_key','{key}');
   localStorage.setItem('jarvis_device_token','{dev_tok}');
-  setTimeout(function(){{location.replace('/')}},400);
+  setTimeout(function(){{location.replace('{target_url}')}},150);
 </script>
 <p>Connecting to JARVIS…</p>
 </body></html>""")
@@ -1113,6 +1114,9 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
             if self._wake_callback:
                 self._wake_callback()
+            asyncio.create_task(self.broadcast(
+                {"type": "wake", "auto_mic": True}
+            ))
             return JSONResponse({"ok": True})
 
         # ── Phone mic real-time audio → Gemini Live ──────────────────────────
