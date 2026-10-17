@@ -1,5 +1,5 @@
 // JARVIS PWA Service Worker — Always-On Wake & Window Focus Handler
-const CACHE_NAME = 'jarvis-pwa-v13';
+const CACHE_NAME = 'jarvis-pwa-v14';
 const ASSETS = [
   '/',
   '/login',

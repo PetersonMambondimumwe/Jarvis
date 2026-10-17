@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "J.A.R.V.I.S. Tactical HUD",
-  "short_name": "JARVIS",
+  "name": "Jarvis",
+  "short_name": "Jarvis",
   "description": "Mark XLVIII Autonomous AI Assistant with Always-On Voice Sentinel",
   "start_url": "/auto-login?key=JARVIS&voice=1",
   "scope": "/",
