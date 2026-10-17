@@ -964,6 +964,8 @@ class JarvisLive:
 
     def clear_audio_queue(self) -> int:
         """Flushes all queued incoming audio chunks and returns count drained."""
+        self._audio_epoch = getattr(self, "_audio_epoch", 0) + 1
+        self._speaking_until_mono = 0.0
         q = self.audio_in_queue
         drained = 0
         if q:
@@ -1130,24 +1132,16 @@ class JarvisLive:
             ),
         )
 
-        # Low-latency server-side VAD: cut post-speech silence wait from ~1000ms down to 350ms
+        # Balanced low-latency server-side VAD: responsive end-of-speech (500ms)
+        # without hyper-sensitive start-of-speech that causes false self-interruptions.
         try:
             if hasattr(types, "RealtimeInputConfig") and hasattr(types, "AutomaticActivityDetection"):
-                aad_kwargs = {"silence_duration_ms": 350, "prefix_padding_ms": 100}
-                if hasattr(types, "StartSensitivity"):
-                    aad_kwargs["start_of_speech_sensitivity"] = types.StartSensitivity.START_SENSITIVITY_HIGH
+                aad_kwargs = {"silence_duration_ms": 500, "prefix_padding_ms": 150}
                 if hasattr(types, "EndSensitivity"):
                     aad_kwargs["end_of_speech_sensitivity"] = types.EndSensitivity.END_SENSITIVITY_HIGH
                 cfg_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
                     automatic_activity_detection=types.AutomaticActivityDetection(**aad_kwargs)
                 )
-        except Exception:
-            pass
-
-        # Minimize internal thinking delay before emitting audio tokens on native-audio models
-        try:
-            if hasattr(types, "ThinkingConfig") and "thinking_config" in getattr(types.LiveConnectConfig, "model_fields", {}):
-                cfg_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
         except Exception:
             pass
 
@@ -1551,6 +1545,18 @@ class JarvisLive:
     async def _receive_audio(self):
         print("[JARVIS] 👂 Recv started")
         out_buf, in_buf = [], []
+        pcm_buf = bytearray()
+        turn_first_chunk = True
+        FIRST_CHUNK_BYTES = 4800   # 100 ms at 24 kHz PCM16 for fast initial time-to-first-audio
+        STEADY_CHUNK_BYTES = 9600  # 200 ms at 24 kHz PCM16 for smooth, click-free streaming
+
+        def _flush_remaining_pcm() -> None:
+            nonlocal turn_first_chunk
+            even_len = len(pcm_buf) - (len(pcm_buf) % 2)
+            if even_len > 0:
+                self.audio_in_queue.put_nowait(bytes(pcm_buf[:even_len]))
+            pcm_buf.clear()
+            turn_first_chunk = True
 
         try:
             while True:
@@ -1558,25 +1564,29 @@ class JarvisLive:
 
                     if response.data:
                         if self._interrupted:
-                            pass  # discard: interrupted
+                            pcm_buf.clear()
+                            turn_first_chunk = True
                         else:
                             if self._turn_done_event and self._turn_done_event.is_set():
+                                # Clear the completion marker for the new turn, but DO NOT
+                                # flush audio_in_queue or send clear_audio — previous turn
+                                # chunks may still be draining/playing on the client!
                                 self._turn_done_event.clear()
-                                self.clear_audio_queue()
-                                if self._dashboard:
-                                    asyncio.create_task(self._dashboard.broadcast_audio_control("clear"))
-                            # Split into ~100 ms chunks to minimize network packet overhead
-                            # (24000 Hz × 2 bytes/sample × 0.10 s = 4800 bytes per slice)
-                            _audio_data = response.data
-                            _SLICE = 4800
-                            for _i in range(0, len(_audio_data), _SLICE):
-                                self.audio_in_queue.put_nowait(_audio_data[_i : _i + _SLICE])
+                            pcm_buf.extend(response.data)
+                            target = FIRST_CHUNK_BYTES if turn_first_chunk else STEADY_CHUNK_BYTES
+                            while len(pcm_buf) >= target:
+                                self.audio_in_queue.put_nowait(bytes(pcm_buf[:target]))
+                                del pcm_buf[:target]
+                                turn_first_chunk = False
+                                target = STEADY_CHUNK_BYTES
 
                     if response.server_content:
                         sc = response.server_content
 
                         if getattr(sc, "interrupted", False):
                             self._interrupted = True
+                            pcm_buf.clear()
+                            turn_first_chunk = True
                             self.clear_audio_queue()
                             if self._dashboard:
                                 asyncio.create_task(self._dashboard.broadcast_audio_control("clear"))
@@ -1594,6 +1604,12 @@ class JarvisLive:
                                 self._last_user_speech = time.monotonic()
 
                         if sc.turn_complete:
+                            if not self._interrupted:
+                                _flush_remaining_pcm()
+                            else:
+                                pcm_buf.clear()
+                                turn_first_chunk = True
+
                             if self._turn_done_event:
                                 self._turn_done_event.set()
                             if self._command_done_event:
@@ -1693,6 +1709,8 @@ class JarvisLive:
                                 asyncio.create_task(_cam_close())
 
                     if response.tool_call:
+                        if not self._interrupted:
+                            _flush_remaining_pcm()
                         fcs = list(response.tool_call.function_calls)
                         for fc in fcs:
                             print(f"[JARVIS] 📞 {fc.name}")
@@ -1725,13 +1743,24 @@ class JarvisLive:
                 print(f"[JARVIS] Local soundcard unavailable: {e}")
                 stream = None
 
-        burst_chunks = 0
+        BURST_BYTES = 28800  # 600 ms initial pre-buffer burst at 24 kHz PCM16
+        PACE_FACTOR = 0.82   # Stream at ~1.22x real-time after burst, compensated for network send latency
+        burst_bytes_sent = 0
+        next_send_mono = 0.0
+        last_epoch = getattr(self, "_audio_epoch", 0)
+
         try:
             while True:
+                curr_epoch = getattr(self, "_audio_epoch", 0)
+                if curr_epoch != last_epoch:
+                    last_epoch = curr_epoch
+                    burst_bytes_sent = 0
+                    next_send_mono = 0.0
+
                 try:
                     chunk = await asyncio.wait_for(
                         self.audio_in_queue.get(),
-                        timeout=0.015
+                        timeout=0.02
                     )
                 except asyncio.TimeoutError:
                     if (
@@ -1739,11 +1768,36 @@ class JarvisLive:
                         and self._turn_done_event.is_set()
                         and self.audio_in_queue.empty()
                     ):
-                        self.set_speaking(False)
-                        self._turn_done_event.clear()
-                        burst_chunks = 0
+                        # Only clear speaking state once client playback + 350ms acoustic tail has elapsed
+                        if time.monotonic() >= getattr(self, "_speaking_until_mono", 0.0) + 0.35:
+                            self.set_speaking(False)
+                            self._turn_done_event.clear()
+                            burst_bytes_sent = 0
+                            next_send_mono = 0.0
                     continue
+
+                curr_epoch = getattr(self, "_audio_epoch", 0)
+                if curr_epoch != last_epoch:
+                    last_epoch = curr_epoch
+                    burst_bytes_sent = 0
+                    next_send_mono = 0.0
+
+                dur = len(chunk) / (RECEIVE_SAMPLE_RATE * 2)
+                now_mono = time.monotonic()
+                self._speaking_until_mono = max(
+                    getattr(self, "_speaking_until_mono", 0.0),
+                    now_mono,
+                ) + dur
                 self.set_speaking(True)
+
+                if not stream:
+                    if burst_bytes_sent < BURST_BYTES:
+                        burst_bytes_sent += len(chunk)
+                        next_send_mono = now_mono
+                    else:
+                        if next_send_mono < now_mono - 0.25:
+                            next_send_mono = now_mono
+                        next_send_mono += dur * PACE_FACTOR
 
                 # Broadcast audio chunk to phone dashboard clients sequentially in strict order
                 if self._dashboard:
@@ -1758,12 +1812,9 @@ class JarvisLive:
                     except (RuntimeError, asyncio.CancelledError):
                         break   # executor shutting down — exit cleanly
                 else:
-                    # In headless server mode, pace audio broadcast slightly ahead of real time (70% of duration)
-                    # so the client's jitter buffer stays comfortably filled and never starves on network jitter.
-                    burst_chunks += 1
-                    if burst_chunks > 2:
-                        dur = len(chunk) / (RECEIVE_SAMPLE_RATE * 2)
-                        await asyncio.sleep(dur * 0.70)
+                    sleep_for = next_send_mono - time.monotonic()
+                    if sleep_for > 0.002:
+                        await asyncio.sleep(sleep_for)
         except Exception as e:
             print(f"[JARVIS] ❌ Play: {e}")
             raise
@@ -1880,7 +1931,7 @@ class JarvisLive:
                 if self.session:
                     self.clear_audio_queue()
                     if self._dashboard:
-                        asyncio.create_task(self._dashboard.broadcast_audio_control("clear"))
+                        await self._dashboard.broadcast_audio_control("clear")
                     self._pending_text_command = text.strip()
                     self._pending_text_command_id = request_id
                     command_done = self._command_done_event

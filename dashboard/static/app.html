@@ -1489,10 +1489,22 @@
     }
 
     _requestWakeLock();
+    let _wsPingTick = 0;
     setInterval(() => {
       if (document.visibilityState === 'visible') _requestWakeLock();
       if (_audioCtx && _audioCtx.state === 'suspended') {
         try { _audioCtx.resume(); } catch (_) {}
+      }
+      _wsPingTick = (_wsPingTick + 1) % 2;
+      if (_wsPingTick === 0) {
+        if (_ws && _ws.readyState === WebSocket.OPEN) {
+          try { _ws.send(JSON.stringify({ type: 'ping' })); } catch (_) {}
+        }
+        if (_speakerWs && _speakerWs.readyState === WebSocket.OPEN) {
+          try { _speakerWs.send('ping'); } catch (_) {}
+        } else if (typeof _speakerDesired === 'function' && _speakerDesired()) {
+          _connectSpeaker();
+        }
       }
     }, 10000);
 
@@ -1829,12 +1841,13 @@
 
     const VOICE_SEND_SAMPLES = 960; // 60ms frames at 16kHz
     const MAX_VOICE_WS_BUFFER = 256 * 1024;
-    const JITTER_BUFFER_SECONDS = 0.12; // 120ms jitter buffer prevents mobile Wi-Fi/LTE audio underruns
+    const JITTER_BUFFER_SECONDS = 0.22; // 220ms jitter cushion prevents mobile Wi-Fi/LTE audio underruns
     let _activeAudioSources = [];
     window._activeAudioSources = _activeAudioSources;
     let _audioProcessChain = Promise.resolve();
     let _playbackGeneration = 0;
     let _playbackState = 'idle';
+    let _lastPlaybackEndedAt = 0;
 
     try {
       _speakerClientId = localStorage.getItem('jarvis_speaker_client_id') || '';
@@ -1856,7 +1869,7 @@
       for (const s of _activeAudioSources) {
         try { s.stop(); s.disconnect(); } catch (_) {}
       }
-      _activeAudioSources = [];
+      _activeAudioSources.length = 0;
       window._jarvisAudioEnergy = 0;
       _playbackState = 'idle';
     }
@@ -1864,6 +1877,15 @@
     function _sendVoiceBuffer(ws, buffer) {
       if (ws.readyState !== WebSocket.OPEN) return false;
       if (ws.bufferedAmount > MAX_VOICE_WS_BUFFER) return false;
+      // Acoustic echo gate: suppress phone mic frames while Jarvis's voice is playing
+      // out of the phone speaker (+ 380ms room reverb tail) to prevent self-interruption.
+      if (
+        _playbackState === 'playing' ||
+        _activeAudioSources.length > 0 ||
+        (performance.now() - _lastPlaybackEndedAt < 380)
+      ) {
+        return false;
+      }
       ws.send(buffer);
       return true;
     }
@@ -1945,6 +1967,69 @@
       return _audioSink;
     }
 
+    function _schedulePcmArrayBuffer(ctx, arrayBuf, gen) {
+      if (gen !== _playbackGeneration || !_ttsEnabled) return;
+      if (!(arrayBuf instanceof ArrayBuffer) || arrayBuf.byteLength <= 1) return;
+
+      try {
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+        if (typeof _stopWakeSentinel === 'function' && _wakeRec) {
+          _stopWakeSentinel();
+        }
+        _requestWakeLock();
+
+        const byteLen = arrayBuf.byteLength - (arrayBuf.byteLength % 2);
+        if (byteLen <= 0) return;
+        const pcm16 = new Int16Array(arrayBuf, 0, byteLen / 2);
+        const f32 = new Float32Array(pcm16.length);
+        let sumSq = 0;
+        for (let i = 0; i < pcm16.length; i++) {
+          const sample = pcm16[i] / 32768.0;
+          f32[i] = sample;
+          sumSq += sample * sample;
+        }
+        window._jarvisAudioEnergy = Math.sqrt(sumSq / Math.max(1, pcm16.length));
+
+        const now = ctx.currentTime;
+        const isGapOrStart = _playTime <= now;
+        if (isGapOrStart) {
+          _playTime = now + JITTER_BUFFER_SECONDS;
+          // Smooth 48-sample (2ms) fade-in on turn onset or resync to eliminate clicks
+          const ramp = Math.min(48, f32.length);
+          for (let k = 0; k < ramp; k++) {
+            f32[k] *= (k / ramp);
+          }
+        }
+
+        const buf = ctx.createBuffer(1, f32.length, 24000);
+        buf.getChannelData(0).set(f32);
+
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(ctx.destination);
+        src.start(_playTime);
+        _playTime += buf.duration;
+
+        _activeAudioSources.push(src);
+        _playbackState = 'playing';
+        src.onended = () => {
+          const idx = _activeAudioSources.indexOf(src);
+          if (idx !== -1) _activeAudioSources.splice(idx, 1);
+          if (_activeAudioSources.length === 0 && _playbackState === 'playing') {
+            _playbackState = 'idle';
+            _playTime = 0;
+            _lastPlaybackEndedAt = performance.now();
+            window._jarvisAudioEnergy = 0;
+            if (typeof _scheduleWakeSentinelRestart === 'function') {
+              _scheduleWakeSentinelRestart(700);
+            }
+          }
+        };
+      } catch (err) {
+        console.error('Audio playback error:', err);
+      }
+    }
+
     function _playJarvisAudio(data) {
       if (typeof data === 'string') {
         try {
@@ -1958,68 +2043,24 @@
       if (!_ttsEnabled) return;
 
       const gen = _playbackGeneration;
+      const ctx = _ensureAudioCtx();
+
+      // Fast synchronous path when data is already an ArrayBuffer and AudioContext is running
+      if (data instanceof ArrayBuffer && ctx.state === 'running') {
+        _schedulePcmArrayBuffer(ctx, data, gen);
+        return;
+      }
+
       _audioProcessChain = _audioProcessChain.then(async () => {
         if (gen !== _playbackGeneration || !_ttsEnabled) return;
-
         let arrayBuf = data;
         if (data instanceof Blob) {
           arrayBuf = await data.arrayBuffer();
         }
-        if (gen !== _playbackGeneration || !(arrayBuf instanceof ArrayBuffer) || arrayBuf.byteLength <= 0) return;
-
-        try {
-          if (window.speechSynthesis) window.speechSynthesis.cancel();
-          if (typeof _stopWakeSentinel === 'function' && _wakeRec) {
-            _stopWakeSentinel();
-          }
-          _requestWakeLock();
-          const ctx = _ensureAudioCtx();
-          if (ctx.state === 'suspended') await ctx.resume();
-          if (gen !== _playbackGeneration) return;
-
-          const byteLen = arrayBuf.byteLength - (arrayBuf.byteLength % 2);
-          if (byteLen <= 0) return;
-          const pcm16 = new Int16Array(arrayBuf, 0, byteLen / 2);
-          const f32 = new Float32Array(pcm16.length);
-          let sumSq = 0;
-          for (let i = 0; i < pcm16.length; i++) {
-            const sample = pcm16[i] / 32768.0;
-            f32[i] = sample;
-            sumSq += sample * sample;
-          }
-          window._jarvisAudioEnergy = Math.sqrt(sumSq / Math.max(1, pcm16.length));
-
-          const buf = ctx.createBuffer(1, f32.length, 24000);
-          buf.getChannelData(0).set(f32);
-
-          const src = ctx.createBufferSource();
-          src.buffer = buf;
-          src.connect(ctx.destination);
-
-          const now = ctx.currentTime;
-          if (_playTime <= now) {
-            _playTime = now + JITTER_BUFFER_SECONDS;
-          }
-          src.start(_playTime);
-          _playTime += buf.duration;
-
-          _activeAudioSources.push(src);
-          _playbackState = 'playing';
-          src.onended = () => {
-            const idx = _activeAudioSources.indexOf(src);
-            if (idx !== -1) _activeAudioSources.splice(idx, 1);
-            if (_activeAudioSources.length === 0 && _playbackState === 'playing') {
-              _playbackState = 'idle';
-              _playTime = 0;
-              window._jarvisAudioEnergy = 0;
-              if (typeof _scheduleWakeSentinelRestart === 'function') {
-                _scheduleWakeSentinelRestart(700);
-              }
-            }
-          };
-        } catch (err) {
-          console.error('Audio playback error:', err);
+        if (ctx.state === 'suspended') {
+          try { await ctx.resume(); } catch (_) {}
         }
+        _schedulePcmArrayBuffer(ctx, arrayBuf, gen);
       }).catch(err => {
         console.error('Audio playback pipeline error:', err);
       });
@@ -2076,7 +2117,8 @@
         const wasCurrent = _speakerWs === ws;
         if (wasCurrent) {
           _speakerWs = null;
-          _stopAllAudio();
+          // Do NOT call _stopAllAudio() on unexpected socket close so any
+          // already-buffered WebAudio chunks finish playing without cutting off!
         }
         if (!wasCurrent || e.code === 4002 || !_speakerDesired()) return;
         if (e.code === 4001) {

@@ -396,6 +396,7 @@ class DashboardServer:
         self._phone_audio_ws_clients: set[WebSocket] = set()
         self._phone_speaker_ws_clients: set[WebSocket] = set()
         self._phone_speaker_clients: dict[str, WebSocket] = {}
+        self._speaker_send_lock: asyncio.Lock = asyncio.Lock()
         self._linkedin_oauth_states: dict[str, float] = {}
         self._consumed_oauth_states: set[str] = set()
         self._uploads_dir                 = UPLOADS_DIR
@@ -532,35 +533,53 @@ class DashboardServer:
             self._clients -= dead
 
     async def broadcast_audio(self, pcm_chunk: bytes) -> None:
-        """Send raw PCM audio chunks concurrently to connected phone audio websockets."""
-        targets = list(self._phone_speaker_ws_clients) if self._phone_speaker_ws_clients else list(self._phone_audio_ws_clients)
-        if not targets:
-            return
-        results = await asyncio.gather(
-            *(asyncio.wait_for(ws.send_bytes(pcm_chunk), timeout=0.2) for ws in targets),
-            return_exceptions=True,
-        )
-        dead = {ws for ws, res in zip(targets, results) if isinstance(res, BaseException)}
-        if dead:
-            self._phone_audio_ws_clients -= dead
-            for ws in dead:
-                self._discard_phone_speaker(ws)
+        """Send raw PCM audio chunks in strict serialized order to connected speaker websockets."""
+        async with self._speaker_send_lock:
+            targets = (
+                list(self._phone_speaker_ws_clients)
+                if self._phone_speaker_ws_clients
+                else list(self._phone_audio_ws_clients)
+            )
+            if not targets:
+                return
+            results = await asyncio.gather(
+                *(asyncio.wait_for(ws.send_bytes(pcm_chunk), timeout=4.0) for ws in targets),
+                return_exceptions=True,
+            )
+            dead = {ws for ws, res in zip(targets, results) if isinstance(res, BaseException)}
+            if dead:
+                self._phone_audio_ws_clients -= dead
+                for ws in dead:
+                    self._discard_phone_speaker(ws)
+                    try:
+                        await asyncio.wait_for(ws.close(code=1011), timeout=0.5)
+                    except Exception:
+                        pass
 
     async def broadcast_audio_control(self, action: str) -> None:
-        """Send audio control messages (e.g. clear/stop) concurrently to connected speaker websockets."""
-        targets = list(self._phone_speaker_ws_clients) if self._phone_speaker_ws_clients else list(self._phone_audio_ws_clients)
-        if not targets:
-            return
-        msg = json.dumps({"type": "clear_audio" if action == "clear" else action})
-        results = await asyncio.gather(
-            *(asyncio.wait_for(ws.send_text(msg), timeout=0.2) for ws in targets),
-            return_exceptions=True,
-        )
-        dead = {ws for ws, res in zip(targets, results) if isinstance(res, BaseException)}
-        if dead:
-            self._phone_audio_ws_clients -= dead
-            for ws in dead:
-                self._discard_phone_speaker(ws)
+        """Send audio control messages (e.g. clear/stop) in strict serialized order to connected speaker websockets."""
+        async with self._speaker_send_lock:
+            targets = (
+                list(self._phone_speaker_ws_clients)
+                if self._phone_speaker_ws_clients
+                else list(self._phone_audio_ws_clients)
+            )
+            if not targets:
+                return
+            msg = json.dumps({"type": "clear_audio" if action == "clear" else action})
+            results = await asyncio.gather(
+                *(asyncio.wait_for(ws.send_text(msg), timeout=4.0) for ws in targets),
+                return_exceptions=True,
+            )
+            dead = {ws for ws, res in zip(targets, results) if isinstance(res, BaseException)}
+            if dead:
+                self._phone_audio_ws_clients -= dead
+                for ws in dead:
+                    self._discard_phone_speaker(ws)
+                    try:
+                        await asyncio.wait_for(ws.close(code=1011), timeout=0.5)
+                    except Exception:
+                        pass
 
     def _discard_phone_speaker(self, websocket: WebSocket) -> None:
         self._phone_speaker_ws_clients.discard(websocket)
@@ -1150,8 +1169,21 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
             await self._register_phone_speaker(speaker_id, websocket)
             try:
                 while True:
-                    await websocket.receive_text()
-            except WebSocketDisconnect:
+                    try:
+                        msg_txt = await asyncio.wait_for(websocket.receive_text(), timeout=45.0)
+                        if msg_txt == "ping" or '"ping"' in msg_txt:
+                            async with self._speaker_send_lock:
+                                await asyncio.wait_for(
+                                    websocket.send_text('{"type":"pong"}'),
+                                    timeout=2.0,
+                                )
+                    except asyncio.TimeoutError:
+                        async with self._speaker_send_lock:
+                            await asyncio.wait_for(
+                                websocket.send_text('{"type":"keepalive"}'),
+                                timeout=2.0,
+                            )
+            except (WebSocketDisconnect, Exception):
                 pass
             finally:
                 self._discard_phone_speaker(websocket)
@@ -1318,6 +1350,12 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
             try:
                 while True:
                     data = await websocket.receive_json()
+                    if data.get("type") == "ping":
+                        try:
+                            await websocket.send_json({"type": "pong"})
+                        except Exception:
+                            break
+                        continue
                     if data.get("type") == "command":
                         enc = data.get("enc", "")
                         t   = self._decrypt(tok, enc) if enc else (data.get("text") or "").strip()
@@ -1347,6 +1385,7 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
         asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, PORT + 1)
         cfg = uvicorn.Config(
             self.app, host="0.0.0.0", port=PORT + 1, log_level="warning",
+            ws_ping_interval=20.0, ws_ping_timeout=60.0, timeout_keep_alive=65,
             ssl_keyfile=str(ssl_key), ssl_certfile=str(ssl_cert),
         )
         print(f"[Dashboard] Manual entry:  {self._ip}:{PORT + 1}  (type in browser, accept cert once)")
@@ -1371,6 +1410,7 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
 
         cfg = uvicorn.Config(
             self.app, host="0.0.0.0", port=PORT, log_level="warning",
+            ws_ping_interval=20.0, ws_ping_timeout=60.0, timeout_keep_alive=65,
             **({"ssl_keyfile": str(ssl_key), "ssl_certfile": str(ssl_cert)} if use_ssl else {}),
         )
 
