@@ -3,46 +3,78 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>JARVIS Dashboard</title>
+  <title>J.A.R.V.I.S. // MK-XLVIII TACTICAL HUD</title>
   <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#050508">
+  <meta name="theme-color" content="#04060A">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="JARVIS">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link rel="icon" type="image/png" href="/static/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Chakra+Petch:ital,wght@0,600;0,700;1,700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="/static/crypto.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --app-height: 100vh;
-      --bg:       #050508;
-      --surface:  rgba(255,255,255,0.03);
-      --surface2: rgba(255,255,255,0.06);
-      --border:   rgba(255,255,255,0.06);
-      --accent:   #22d3ee;
-      --accent-dim: rgba(34,211,238,0.10);
-      --accent-glow: rgba(34,211,238,0.25);
-      --text:     #c8d6e5;
-      --text-hi:  #e8eef5;
-      --muted:    #4a5568;
-      --green:    #22c55e;
-      --gdim:     rgba(34,197,94,0.12);
-      --red:      #ef4444;
-      --glass:    rgba(10,12,18,0.65);
-      --glass-border: rgba(255,255,255,0.08);
+      --bg:          #04060A;
+      --bg-deep:     #020306;
+      --surface:     rgba(10, 16, 26, 0.78);
+      --surface2:    rgba(15, 24, 38, 0.90);
+      --border:      rgba(0, 240, 255, 0.18);
+      --border-hi:   rgba(0, 240, 255, 0.46);
+      --accent:      #00F0FF;
+      --accent-dim:  rgba(0, 240, 255, 0.12);
+      --crimson:     #FF2A3C;
+      --crimson-dim: rgba(255, 42, 60, 0.16);
+      --amber:       #FF8A00;
+      --text:        #D8E4F0;
+      --text-hi:     #F4F8FC;
+      --muted:       #93A8C1;
+      --green:       #00E676;
+      --gdim:        rgba(0, 230, 118, 0.12);
+      --red:         #FF2A3C;
+      --glass:       rgba(7, 11, 18, 0.86);
+      --glass-border:rgba(0, 240, 255, 0.24);
+      --font-display:'Chakra Petch', 'Barlow', sans-serif;
+      --font-sans:   'Barlow', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono:   'IBM Plex Mono', monospace;
+      --chamfer-sm:  polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px));
+      --chamfer-md:  polygon(0 0, calc(100% - 11px) 0, 100% 11px, 100% 100%, 11px 100%, 0 calc(100% - 11px));
+      --chamfer-lg:  polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+    }
+
+    ::selection {
+      background: rgba(255, 42, 60, 0.32);
+      color: var(--text-hi);
     }
 
     html {
       width: 100%; height: 100%; min-height: 100%;
       overflow: hidden; background: var(--bg);
+      color-scheme: dark;
     }
     body {
       width: 100%; height: var(--app-height); min-height: 0;
-      background: var(--bg); color: var(--text);
-      font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+      background:
+        radial-gradient(circle at 50% 48%, rgba(0, 240, 255, 0.06) 0%, rgba(255, 42, 60, 0.025) 38%, rgba(4, 6, 10, 0.98) 76%),
+        var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      font-variant-numeric: tabular-nums;
       display: flex; flex-direction: column; overflow: hidden;
       touch-action: manipulation;
+      position: relative;
+    }
+
+    /* Combat mode body state when recording or high-alert */
+    body.combat-lock {
+      --border: rgba(255, 42, 60, 0.28);
+      --border-hi: rgba(255, 42, 60, 0.65);
+      --glass-border: rgba(255, 42, 60, 0.38);
     }
 
     @supports (height: 100svh) {
@@ -54,148 +86,238 @@
     }
     .is-standalone #install-btn { display: none !important; }
 
+    /* ── HUD CORNER TELEMETRY FRAMES ── */
+    .hud-telemetry {
+      position: fixed; pointer-events: none; z-index: 6;
+      font-family: var(--font-mono); font-size: 11px; letter-spacing: 1.5px;
+      color: var(--muted); text-transform: uppercase;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .hud-tl { top: 64px; left: 18px; }
+    .hud-tr { top: 64px; right: 18px; text-align: right; align-items: flex-end; }
+    .hud-bl { bottom: 76px; left: 18px; }
+    .hud-br { bottom: 76px; right: 18px; text-align: right; align-items: flex-end; }
+    .hud-telemetry span.hi { color: var(--accent); font-weight: 700; }
+    .hud-telemetry span.crim { color: var(--crimson); font-weight: 700; }
+
     /* ── INSTALL MODAL ── */
     .modal-backdrop {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.82); backdrop-filter: blur(12px);
+      position: fixed; inset: 0; background: rgba(2, 4, 8, 0.88); backdrop-filter: blur(14px);
       display: none; align-items: center; justify-content: center; z-index: 1000;
-      padding: 16px; animation: fadeUp 0.2s ease;
+      padding: 16px; animation: fadeUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .modal-backdrop.open { display: flex; }
     .modal-card {
-      background: rgba(10,14,22,0.95); border: 1px solid rgba(34,211,238,0.18); border-radius: 20px;
-      width: 100%; max-width: 420px; padding: 24px;
-      box-shadow: 0 24px 64px rgba(0,0,0,0.7), 0 0 40px rgba(34,211,238,0.05);
+      background: rgba(8, 13, 22, 0.96);
+      border: 1px solid var(--border-hi);
+      clip-path: var(--chamfer-lg);
+      width: 100%; max-width: 430px; padding: 24px;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85);
       backdrop-filter: blur(20px);
     }
-    .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-    .modal-title { font-size: 15px; font-weight: 700; color: var(--text-hi); letter-spacing: 0.8px; }
-    .modal-close { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px; line-height: 1; }
-    .modal-close:hover { color: #fff; }
-    .modal-sub { font-size: 12px; color: var(--muted); line-height: 1.6; margin-bottom: 18px; }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .modal-title {
+      font-family: var(--font-display); font-size: 16px; font-weight: 700;
+      color: var(--text-hi); letter-spacing: 2px; text-transform: uppercase;
+    }
+    .modal-close {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      font-size: 12px; cursor: pointer; padding: 4px 8px; line-height: 1;
+      font-family: var(--font-mono); transition: all 0.15s;
+    }
+    .modal-close:hover { color: var(--text-hi); border-color: var(--crimson); background: var(--crimson-dim); }
+    .modal-sub { font-size: 14px; color: var(--muted); line-height: 1.6; margin-bottom: 18px; }
     .install-tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
     .tab-btn {
-      flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent;
-      background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+      flex: 1; padding: 9px 10px; clip-path: var(--chamfer-sm);
+      border: 1px solid var(--border);
+      background: var(--surface); color: var(--muted);
+      font-family: var(--font-display); font-size: 12px; font-weight: 700;
+      letter-spacing: 1.2px; text-transform: uppercase; cursor: pointer; transition: all 0.2s;
     }
-    .tab-btn.active { background: var(--accent-dim); border-color: rgba(34,211,238,0.25); color: var(--accent); }
+    .tab-btn.active {
+      background: var(--accent-dim); border-color: var(--accent); color: var(--accent);
+    }
     .tab-content { display: none; flex-direction: column; gap: 12px; }
     .tab-content.active { display: flex; }
     .install-step { display: flex; align-items: flex-start; gap: 12px; }
     .step-num {
-      width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #000;
-      font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
+      width: 24px; height: 24px; clip-path: var(--chamfer-sm);
+      background: var(--accent); color: #04060A;
+      font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
     }
-    .step-txt { font-size: 13px; line-height: 1.5; color: var(--text); }
-    .badge-icon { background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 4px; font-size: 12px; font-family: monospace; }
+    .step-txt { font-size: 14px; line-height: 1.5; color: var(--text); }
+    .badge-icon {
+      background: rgba(0, 240, 255, 0.1); border: 1px solid var(--border);
+      padding: 1px 6px; font-size: 11px; font-family: var(--font-mono); color: var(--accent);
+    }
 
-    /* ── TOP BAR ── */
+    /* ── TOP TACTICAL COMMAND BAR ── */
     header {
       flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
-      padding: max(12px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px));
-      background: linear-gradient(to bottom, rgba(5,5,8,0.92) 60%, transparent);
-      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      padding: max(12px, env(safe-area-inset-top, 0px)) max(18px, env(safe-area-inset-right, 0px)) 11px max(18px, env(safe-area-inset-left, 0px));
+      background: linear-gradient(to bottom, rgba(4, 6, 10, 0.96) 65%, rgba(4, 6, 10, 0.45));
+      border-bottom: 1px solid rgba(0, 240, 255, 0.16);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
       z-index: 20; position: relative;
     }
+    header::after {
+      content: ''; position: absolute; bottom: -1px; left: 18px; width: 64px; height: 2px;
+      background: var(--crimson);
+    }
+    .brand-cluster {
+      display: flex; align-items: center; gap: 8px;
+    }
     .logo {
-      font-size: 14px; font-weight: 700; letter-spacing: 6px; text-transform: uppercase;
-      color: rgba(255,255,255,0.5);
+      font-family: var(--font-display);
+      font-size: 16px; font-weight: 700; letter-spacing: 5px; text-transform: uppercase;
+      color: var(--text-hi);
+      display: flex; align-items: center; gap: 2px;
     }
-    .logo em { color: var(--accent); font-style: normal; }
+    .logo em {
+      color: var(--crimson); font-style: normal;
+    }
+    .logo-tag {
+      font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+      letter-spacing: 1.2px; color: var(--accent);
+      padding: 2px 6px; background: rgba(0, 240, 255, 0.08);
+      border: 1px solid rgba(0, 240, 255, 0.24);
+    }
     .pill {
-      display: flex; align-items: center; gap: 5px; padding: 4px 10px;
-      border-radius: 99px; background: var(--surface); border: 1px solid var(--border);
-      font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
-      color: var(--muted); transition: all 0.3s;
+      display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px;
+      clip-path: var(--chamfer-sm);
+      background: var(--surface); border: 1px solid var(--border);
+      font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+      letter-spacing: 1.4px; text-transform: uppercase;
+      color: var(--muted); transition: all 0.25s;
     }
-    .pill.on { background: var(--gdim); border-color: rgba(34,197,94,0.25); color: var(--green); }
-    .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); transition: background 0.3s; }
-    .pill.on .dot { background: var(--green); animation: blink 2s infinite; }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.35} }
+    .pill.on {
+      background: rgba(0, 240, 255, 0.10);
+      border-color: rgba(0, 240, 255, 0.45);
+      color: var(--accent);
+    }
+    .dot {
+      width: 6px; height: 6px; background: var(--crimson);
+      transform: rotate(45deg); transition: background 0.3s;
+    }
+    .pill.on .dot {
+      background: var(--accent);
+      animation: blink 1.8s infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.25} }
     .spacer { flex: 1; }
     .enc-badge {
-      font-size: 8px; font-weight: 700; letter-spacing: 1.5px; padding: 3px 7px;
-      border-radius: 4px; display: none;
+      font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+      letter-spacing: 1.2px; padding: 4px 8px;
+      clip-path: var(--chamfer-sm); display: none;
     }
-    .enc-badge.on  { display: block; background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.2); color: var(--green); }
-    .enc-badge.off { display: block; background: rgba(255,100,100,0.06); border: 1px solid rgba(255,100,100,0.15); color: #f87171; }
-    .url { font-size: 9px; font-family: monospace; color: var(--muted); padding: 3px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; opacity: 0.6; }
+    .enc-badge.on  {
+      display: block; background: rgba(0, 230, 118, 0.09);
+      border: 1px solid rgba(0, 230, 118, 0.32); color: var(--green);
+    }
+    .enc-badge.off {
+      display: block; background: var(--crimson-dim);
+      border: 1px solid rgba(255, 42, 60, 0.4); color: #FF6B78;
+    }
+    .url {
+      font-size: 11px; font-family: var(--font-mono); color: var(--muted);
+      padding: 4px 9px; background: var(--surface);
+      border: 1px solid var(--border); clip-path: var(--chamfer-sm);
+    }
 
-    /* ── VISUALIZER LAYER (CENTRAL HOLOGRAPHIC FOCAL POINT) ── */
+    /* ── VISUALIZER LAYER (MARK XLVIII TACTICAL TARGETING CORE) ── */
     #viz-layer {
       position: fixed; inset: 0;
       display: flex; align-items: center; justify-content: center;
       pointer-events: none; z-index: 8;
     }
     #viz-container {
-      position: relative; width: min(66vw, 340px); height: min(66vw, 340px);
+      position: relative; width: min(70vw, 370px); height: min(70vw, 370px);
       pointer-events: none; border-radius: 50%;
-      background: radial-gradient(circle, rgba(34,211,238,0.14) 0%, rgba(14,165,233,0.08) 38%, rgba(5,5,8,0.72) 70%, transparent 100%);
-      box-shadow: 
-        0 0 30px rgba(34,211,238,0.22),
-        0 0 70px rgba(6,182,212,0.15),
-        inset 0 0 40px rgba(34,211,238,0.12);
-      transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+      background: radial-gradient(
+        circle,
+        rgba(0, 240, 255, 0.14) 0%,
+        rgba(255, 42, 60, 0.05) 42%,
+        rgba(4, 6, 10, 0.82) 72%,
+        transparent 100%
+      );
+      box-shadow: 0 22px 54px rgba(0, 0, 0, 0.82);
+      transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    /* Corner tactical target-lock brackets framing the core */
+    .reticle-bracket {
+      position: absolute; width: 22px; height: 22px;
+      border-color: var(--crimson); border-style: solid;
+      opacity: 0.82; pointer-events: none;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .rb-tl { top: 4px; left: 4px; border-width: 2px 0 0 2px; }
+    .rb-tr { top: 4px; right: 4px; border-width: 2px 2px 0 0; }
+    .rb-bl { bottom: 4px; left: 4px; border-width: 0 0 2px 2px; }
+    .rb-br { bottom: 4px; right: 4px; border-width: 0 2px 2px 0; }
+    body.combat-lock .reticle-bracket {
+      inset-inline: 14px;
+      border-color: var(--crimson);
+      opacity: 1;
     }
 
     /* Ambient corona aura pulse */
     #viz-energy-aura {
-      position: absolute; inset: -22px; border-radius: 50%;
-      background: radial-gradient(circle, rgba(34,211,238,0.18) 0%, rgba(6,182,212,0.08) 45%, rgba(56,189,248,0.02) 70%, transparent 100%);
-      filter: blur(10px);
-      animation: auraBreathing 3.6s ease-in-out infinite;
+      position: absolute; inset: -24px; border-radius: 50%;
+      background: radial-gradient(
+        circle,
+        rgba(0, 240, 255, 0.18) 0%,
+        rgba(255, 42, 60, 0.09) 48%,
+        transparent 74%
+      );
+      filter: blur(12px);
+      animation: auraBreathing 3.2s ease-in-out infinite;
       pointer-events: none;
     }
 
-    /* Outer segmented tech ring (HUD arc markers) */
+    /* Outer ballistic segmented compass ring */
     #viz-tech-ring-outer {
-      position: absolute; inset: -14px; border-radius: 50%;
-      border: 1px dashed rgba(34,211,238,0.35);
-      border-top-color: rgba(165,243,252,0.85);
-      border-bottom-color: rgba(56,189,248,0.75);
-      box-shadow: 0 0 16px rgba(34,211,238,0.15);
-      animation: spinClockwise 40s linear infinite;
+      position: absolute; inset: -16px; border-radius: 50%;
+      border: 1px dashed rgba(0, 240, 255, 0.42);
+      border-top-color: var(--crimson);
+      border-bottom-color: var(--accent);
+      animation: spinClockwise 32s linear infinite;
       pointer-events: none;
     }
     #viz-tech-ring-outer::before, #viz-tech-ring-outer::after {
-      content: ''; position: absolute; inset: -2px; border-radius: 50%;
-      border: 1.5px solid transparent;
-      border-left-color: rgba(34,211,238,0.8);
-      border-right-color: rgba(165,243,252,0.8);
+      content: ''; position: absolute; inset: -3px; border-radius: 50%;
+      border: 2px solid transparent;
+      border-left-color: var(--crimson);
+      border-right-color: var(--accent);
     }
 
-    /* Inner concentric counter-rotating ring */
+    /* Inner counter-rotating gunship lock ring */
     #viz-tech-ring-inner {
-      position: absolute; inset: 4px; border-radius: 50%;
-      border: 1px dotted rgba(56,189,248,0.32);
-      border-top: 1.5px solid rgba(34,211,238,0.55);
-      border-bottom: 1.5px solid rgba(34,211,238,0.55);
-      animation: spinCounter 25s linear infinite;
+      position: absolute; inset: 6px; border-radius: 50%;
+      border: 1px dotted rgba(0, 240, 255, 0.38);
+      border-top: 2px solid var(--crimson);
+      border-bottom: 2px solid var(--accent);
+      animation: spinCounter 18s linear infinite;
       pointer-events: none;
     }
 
-    /* Arc reactor high-voltage glow ring */
+    /* High-voltage primary containment ring */
     #viz-ring {
       position: absolute; inset: -2px; border-radius: 50%;
-      border: 1.5px solid rgba(56,189,248,0.8);
-      box-shadow: 
-        0 0 16px rgba(34,211,238,0.6),
-        0 0 38px rgba(34,211,238,0.35),
-        0 0 75px rgba(6,182,212,0.2),
-        inset 0 0 25px rgba(34,211,238,0.28);
-      animation: ringPulse 3.5s ease-in-out infinite;
+      border: 1.5px solid rgba(0, 240, 255, 0.78);
+      box-shadow: 0 14px 38px rgba(0, 0, 0, 0.76);
+      animation: ringPulse 2.8s ease-in-out infinite;
       pointer-events: none;
     }
+    body.combat-lock #viz-ring {
+      border-color: var(--crimson);
+    }
+
     @keyframes ringPulse {
-      0%, 100% {
-        opacity: 0.82;
-        border-color: rgba(56,189,248,0.7);
-        box-shadow: 0 0 16px rgba(34,211,238,0.55), 0 0 35px rgba(34,211,238,0.3), inset 0 0 22px rgba(34,211,238,0.22);
-      }
-      50% {
-        opacity: 1;
-        border-color: rgba(165,243,252,0.95);
-        box-shadow: 0 0 26px rgba(34,211,238,0.85), 0 0 65px rgba(6,182,212,0.5), inset 0 0 38px rgba(34,211,238,0.4);
-      }
+      0%, 100% { opacity: 0.82; transform: scale(1); }
+      50%      { opacity: 1;    transform: scale(1.008); }
     }
     @keyframes spinClockwise {
       0%   { transform: rotate(0deg); }
@@ -206,274 +328,352 @@
       100% { transform: rotate(-360deg); }
     }
     @keyframes auraBreathing {
-      0%, 100% { opacity: 0.65; transform: scale(0.97); }
-      50%      { opacity: 1.0;  transform: scale(1.03); }
+      0%, 100% { opacity: 0.65; transform: scale(0.96); }
+      50%      { opacity: 1.0;  transform: scale(1.04); }
     }
 
     #viz-canvas {
       width: 100%; height: 100%; display: block; position: relative; z-index: 2;
     }
 
-    /* Status text below viz */
+    /* Tactical status readout below core */
     #viz-status {
-      position: absolute; bottom: -34px; left: 50%; transform: translateX(-50%);
-      font-size: 10px; letter-spacing: 3.5px; text-transform: uppercase;
-      color: #38bdf8; font-weight: 800; white-space: nowrap;
-      text-shadow: 0 0 10px rgba(56,189,248,0.7), 0 0 22px rgba(34,211,238,0.35);
-      background: rgba(8,14,24,0.75);
-      padding: 3px 14px; border-radius: 99px;
-      border: 1px solid rgba(34,211,238,0.28);
-      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      position: absolute; bottom: -40px; left: 50%; transform: translateX(-50%);
+      font-family: var(--font-mono);
+      font-size: 11px; letter-spacing: 2.5px; text-transform: uppercase;
+      color: var(--accent); font-weight: 700; white-space: nowrap;
+      background: rgba(6, 10, 18, 0.92);
+      padding: 5px 16px;
+      clip-path: var(--chamfer-sm);
+      border: 1px solid var(--border-hi);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
       pointer-events: none; z-index: 3;
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.72);
     }
-    /* TTS button positioned near bottom-right of viz */
+    body.combat-lock #viz-status {
+      color: #FF6B78;
+      border-color: var(--crimson);
+      background: rgba(24, 6, 10, 0.94);
+    }
+
+    /* TTS toggle positioned near bottom-right of viz */
     #tts-area {
-      position: absolute; bottom: -32px; right: -4px;
+      position: absolute; bottom: -38px; right: -8px;
       pointer-events: auto; z-index: 4;
     }
 
-    /* ── CONVERSATION LAYER (BEHIND & AROUND THE ORB) ── */
+    /* ── CONVERSATION LAYER (TACTICAL COMMS LOG) ── */
     main {
       flex: 1 1 auto; min-height: 0; overflow-y: auto;
-      padding: 85px max(16px, calc(50vw - 370px)) 95px;
+      padding: 85px max(18px, calc(50vw - 390px)) 98px;
       display: flex; flex-direction: column; gap: 12px;
-      overscroll-behavior: contain; z-index: 4; position: relative;
-      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 8%, black 92%, transparent 100%);
-      mask-image: linear-gradient(to bottom, transparent 0%, black 8%, black 92%, transparent 100%);
+      overscroll-behavior: contain; z-index: 10; position: relative;
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 7%, black 93%, transparent 100%);
+      mask-image: linear-gradient(to bottom, transparent 0%, black 7%, black 93%, transparent 100%);
     }
-    main::-webkit-scrollbar { width: 2px; }
-    main::-webkit-scrollbar-thumb { background: rgba(34,211,238,0.15); border-radius: 2px; }
+    main::-webkit-scrollbar { width: 3px; }
+    main::-webkit-scrollbar-track { background: rgba(4, 6, 10, 0.4); }
+    main::-webkit-scrollbar-thumb { background: rgba(0, 240, 255, 0.28); }
 
-    /* ── MESSAGES (INTEGRATED HOLOGRAPHIC READOUTS) ── */
+    /* ── MESSAGES (CHAMFERED TACTICAL TELEMETRY PLATES) ── */
     .msg {
-      max-width: 82%; padding: 12px 16px; border-radius: 14px;
-      font-size: 13.5px; line-height: 1.6;
-      opacity: 0.38; filter: blur(0.35px); transform: scale(0.98);
-      background: rgba(8, 12, 20, 0.40);
-      border: 1px solid rgba(255,255,255,0.04);
-      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-      transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1),
-                  transform 0.5s cubic-bezier(0.16, 1, 0.3, 1),
-                  filter 0.5s cubic-bezier(0.16, 1, 0.3, 1),
-                  background 0.5s ease, border-color 0.5s ease, box-shadow 0.5s ease;
-      animation: holoIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+      max-width: 82%; padding: 13px 17px;
+      clip-path: var(--chamfer-md);
+      font-size: 15px; line-height: 1.6;
+      opacity: 0.48; transform: scale(0.985);
+      background: rgba(7, 12, 20, 0.66);
+      border: 1px solid rgba(0, 240, 255, 0.14);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                  transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                  background 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
+      animation: holoIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     }
     @keyframes holoIn {
-      from { opacity: 0; transform: translateY(14px) scale(0.96); filter: blur(2px); }
-      to   { transform: translateY(0); filter: none; }
+      from { opacity: 0; transform: translateY(12px) scale(0.97); }
+      to   { transform: translateY(0) scale(1); }
     }
     .msg:hover {
-      opacity: 0.88; filter: none; transform: scale(1);
+      opacity: 0.92; transform: scale(1);
+      border-color: rgba(0, 240, 255, 0.28);
     }
     .msg.latest, .msg:last-child {
-      opacity: 1; filter: none; transform: scale(1);
-      background: rgba(9, 15, 25, 0.78);
-      border-color: rgba(34,211,238,0.25);
-      box-shadow: 0 10px 35px rgba(0,0,0,0.55), 0 0 24px rgba(34,211,238,0.1);
-      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      opacity: 1; transform: scale(1);
+      background: rgba(8, 14, 24, 0.90);
+      border: 1px solid rgba(0, 240, 255, 0.44);
+      box-shadow: 0 14px 38px rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
     }
     .msg-j {
       align-self: flex-start;
-      border-left: 2px solid rgba(34,211,238,0.25);
-      border-bottom-left-radius: 4px;
     }
     .msg-j.latest, .msg-j:last-child {
-      border-left: 2.5px solid var(--accent);
-      box-shadow: 0 10px 35px rgba(0,0,0,0.55), 0 0 28px rgba(34,211,238,0.14);
+      border-color: rgba(0, 240, 255, 0.50);
     }
     .msg-u {
       align-self: flex-end;
-      border-right: 2px solid rgba(255,255,255,0.12);
-      border-bottom-right-radius: 4px;
+      background: rgba(14, 18, 28, 0.72);
+      border: 1px solid rgba(255, 42, 60, 0.24);
     }
     .msg-u.latest, .msg-u:last-child {
-      border-right: 2.5px solid rgba(255,255,255,0.45);
+      background: rgba(18, 12, 20, 0.90);
+      border: 1px solid rgba(255, 42, 60, 0.54);
     }
     .msg-sys {
-      align-self: center; font-size: 10px; color: var(--muted); padding: 4px 12px;
-      background: transparent; border: none; letter-spacing: 0.8px;
-      opacity: 0.6; filter: none; transform: none;
+      align-self: center;
+      font-family: var(--font-mono); font-size: 11px; color: var(--muted);
+      padding: 4px 12px; background: rgba(6, 10, 16, 0.68);
+      border: 1px solid rgba(0, 240, 255, 0.14);
+      letter-spacing: 1.4px; text-transform: uppercase;
+      opacity: 0.85; transform: none;
     }
     .lbl {
-      font-size: 8px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase;
-      opacity: 0.45; margin-bottom: 5px;
+      font-family: var(--font-mono);
+      font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+      margin-bottom: 5px; display: flex; align-items: center; gap: 6px;
     }
     .msg-j .lbl { color: var(--accent); }
-    .msg-j.latest .lbl, .msg-j:last-child .lbl { opacity: 0.9; color: #38bdf8; text-shadow: 0 0 8px rgba(56, 189, 248, 0.5); }
-    .msg-u .lbl { color: var(--muted); text-align: right; }
-    .msg-u.latest .lbl, .msg-u:last-child .lbl { opacity: 0.8; }
+    .msg-j .lbl::before {
+      content: ''; width: 5px; height: 5px; background: var(--accent);
+      display: inline-block; transform: rotate(45deg);
+    }
+    .msg-u .lbl { color: #FF6B78; justify-content: flex-end; text-align: right; }
+    .msg-u .lbl::after {
+      content: ''; width: 5px; height: 5px; background: var(--crimson);
+      display: inline-block; transform: rotate(45deg);
+    }
 
     /* ── FILE CARD ── */
     .msg-file {
       align-self: flex-end;
-      background: rgba(8, 12, 20, 0.40); border: 1px solid rgba(255,255,255,0.04);
-      border-radius: 14px; border-bottom-right-radius: 4px;
-      padding: 11px 14px; display: flex; align-items: center; gap: 12px;
-      max-width: 82%; backdrop-filter: blur(8px);
-      opacity: 0.38; filter: blur(0.35px); transform: scale(0.98);
-      transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+      background: rgba(8, 14, 24, 0.74); border: 1px solid var(--border);
+      clip-path: var(--chamfer-md);
+      padding: 12px 15px; display: flex; align-items: center; gap: 12px;
+      max-width: 82%; backdrop-filter: blur(10px);
+      opacity: 0.48; transform: scale(0.985);
+      transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .msg-file.latest, .msg-file:last-child {
-      opacity: 1; filter: none; transform: scale(1);
-      background: rgba(9, 15, 25, 0.78);
-      border-color: rgba(34,211,238,0.22);
-      box-shadow: 0 10px 35px rgba(0,0,0,0.55), 0 0 24px rgba(34,211,238,0.08);
+      opacity: 1; transform: scale(1);
+      background: rgba(9, 16, 28, 0.90);
+      border-color: var(--border-hi);
+      box-shadow: 0 12px 35px rgba(0, 0, 0, 0.72);
     }
-    .fc-icon { font-size: 24px; flex-shrink: 0; }
+    .fc-icon {
+      width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+      background: var(--accent-dim); border: 1px solid var(--border);
+      color: var(--accent); font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+      flex-shrink: 0; clip-path: var(--chamfer-sm);
+    }
     .fc-meta { flex: 1; min-width: 0; }
-    .fc-lbl  { font-size: 8px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; opacity: 0.4; color: var(--muted); margin-bottom: 4px; }
-    .fc-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .fc-size { font-size: 11px; color: var(--muted); margin-top: 2px; }
-    .fc-bar-wrap { height: 2px; background: var(--border); border-radius: 2px; margin-top: 7px; overflow: hidden; }
-    .fc-bar { height: 100%; width: 0%; background: var(--accent); border-radius: 2px; transition: width 0.12s linear; }
-    .fc-status { font-size: 10px; font-weight: 700; letter-spacing: 1px; flex-shrink: 0; color: var(--muted); }
+    .fc-lbl  { font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: 1.8px; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+    .fc-name { font-size: 14px; font-weight: 600; color: var(--text-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fc-size { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .fc-bar-wrap { height: 2px; background: rgba(255,255,255,0.08); margin-top: 7px; overflow: hidden; }
+    .fc-bar { height: 100%; width: 0%; background: var(--accent); transition: width 0.12s linear; }
+    .fc-status { font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: 1px; flex-shrink: 0; color: var(--muted); }
     .fc-status.done { color: var(--green); }
-    .fc-status.err  { color: #f87171; }
-    .fc-dl { display:block; margin-top:6px; font-size:11px; color:var(--accent); text-decoration:none; font-weight:600; }
-    .fc-dl:hover { opacity: 0.8; }
+    .fc-status.err  { color: #FF6B78; }
+    .fc-dl { display: inline-block; margin-top: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--accent); text-decoration: none; font-weight: 700; letter-spacing: 0.8px; }
+    .fc-dl:hover { text-decoration: underline; }
 
-    /* ── FOOTER / INPUT ── */
+    /* ── FOOTER / COMMAND INPUT DECK ── */
     footer {
       flex: 0 0 auto; z-index: 20; position: relative;
-      padding: 10px max(14px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px));
-      background: linear-gradient(to top, rgba(5,5,8,0.98) 70%, transparent);
+      padding: 10px max(16px, env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+      background: linear-gradient(to top, rgba(4, 6, 10, 0.98) 72%, rgba(4, 6, 10, 0.55) 92%, transparent);
+      border-top: 1px solid rgba(0, 240, 255, 0.14);
       display: flex; gap: 8px; align-items: center;
+    }
+    footer::before {
+      content: ''; position: absolute; top: -1px; right: 18px; width: 64px; height: 2px;
+      background: var(--accent);
     }
     #inp {
       flex: 1; min-width: 0; padding: 12px 16px;
-      background: var(--glass); border: 1px solid var(--glass-border);
-      border-radius: 14px; color: var(--text-hi); font-size: 14px;
-      outline: none; transition: border-color 0.2s, box-shadow 0.2s;
-      backdrop-filter: blur(12px);
+      background: var(--glass);
+      border: 1px solid var(--glass-border);
+      clip-path: var(--chamfer-sm);
+      color: var(--text-hi);
+      font-family: var(--font-sans); font-size: 15px;
+      caret-color: var(--crimson);
+      outline: none; transition: border-color 0.2s, background 0.2s;
+      backdrop-filter: blur(14px);
     }
     #inp:focus {
-      border-color: rgba(34,211,238,0.3);
-      box-shadow: 0 0 16px rgba(34,211,238,0.06);
+      border-color: var(--accent);
+      background: rgba(10, 18, 30, 0.94);
     }
-    #inp::placeholder { color: var(--muted); font-size: 13px; }
+    #inp::placeholder {
+      color: var(--muted);
+      font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.8px;
+    }
     .btn {
-      padding: 12px 16px; border: none; border-radius: 14px;
-      font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
-      cursor: pointer; transition: opacity 0.15s, transform 0.1s;
+      padding: 12px 18px; border: 1px solid transparent;
+      clip-path: var(--chamfer-sm);
+      font-family: var(--font-display);
+      font-size: 12px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+      cursor: pointer; transition: all 0.15s;
     }
-    .btn:active { transform: scale(0.95); }
-    .btn:hover  { opacity: 0.85; }
+    .btn:active { transform: scale(0.96); }
     .btn-send {
-      background: var(--accent); color: #050508; font-weight: 800;
+      background: linear-gradient(135deg, var(--accent) 0%, #00B8D4 100%);
+      color: #030508; font-weight: 700;
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+    .btn-send:hover {
+      background: linear-gradient(135deg, #33F3FF 0%, var(--accent) 100%);
     }
     .btn-wake {
-      background: var(--surface); border: 1px solid var(--border); color: var(--muted); display: none;
+      background: var(--crimson-dim); border: 1px solid var(--crimson);
+      color: #FF6B78; display: none;
     }
-    .btn-wake.show { display: block; color: var(--green); border-color: rgba(34,197,94,0.3); }
+    .btn-wake.show { display: block; }
     .btn-attach {
-      background: var(--glass); border: 1px solid var(--glass-border); color: var(--muted);
-      padding: 12px 14px; font-size: 15px; line-height: 1; border-radius: 14px;
+      background: var(--glass); border: 1px solid var(--glass-border); color: var(--text);
+      width: 44px; height: 44px; clip-path: var(--chamfer-sm);
       cursor: pointer; transition: all 0.2s; display: flex;
       align-items: center; justify-content: center; flex-shrink: 0;
       backdrop-filter: blur(12px);
     }
-    .btn-attach:hover  { border-color: rgba(34,211,238,0.25); color: var(--accent); }
+    .btn-attach:hover  { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
     .btn-attach:active { transform: scale(0.95); }
 
     /* ── MIC BUTTON ── */
     #mic-btn {
-      background: var(--glass); border: 1px solid var(--glass-border); color: var(--muted);
-      padding: 12px 14px; font-size: 15px; line-height: 1; border-radius: 14px;
+      background: var(--glass); border: 1px solid var(--glass-border); color: var(--text);
+      width: 44px; height: 44px; clip-path: var(--chamfer-sm);
       cursor: pointer; transition: all 0.2s;
       display: flex; align-items: center; justify-content: center; flex-shrink: 0;
       backdrop-filter: blur(12px);
     }
-    #mic-btn:hover  { border-color: rgba(34,211,238,0.25); color: var(--accent); }
+    #mic-btn:hover  { border-color: var(--crimson); color: var(--crimson); background: var(--crimson-dim); }
     #mic-btn:active { transform: scale(0.95); }
     #mic-btn.recording {
-      background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.35); color: #ef4444;
-      animation: mic-pulse 1s ease-in-out infinite;
+      background: rgba(255, 42, 60, 0.22);
+      border-color: var(--crimson);
+      color: #FF6B78;
+      animation: mic-pulse 0.9s ease-in-out infinite;
     }
-    #mic-btn.unsupported { opacity: 0.3; cursor: not-allowed; }
-    @keyframes mic-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.6;transform:scale(0.97)} }
+    #mic-btn.unsupported { opacity: 0.35; cursor: not-allowed; }
+    @keyframes mic-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: 0.68; transform: scale(0.96); }
+    }
 
     /* ── TTS TOGGLE ── */
     #tts-toggle {
-      padding: 5px 10px; border-radius: 99px; border: 1px solid transparent;
-      font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
-      cursor: pointer; transition: all 0.3s; display: flex; align-items: center; gap: 5px;
-      background: var(--gdim); border-color: rgba(34,197,94,0.25); color: var(--green);
+      padding: 5px 11px; clip-path: var(--chamfer-sm);
+      border: 1px solid rgba(0, 230, 118, 0.35);
+      font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+      letter-spacing: 1.4px; text-transform: uppercase;
+      cursor: pointer; transition: all 0.25s; display: flex; align-items: center; gap: 6px;
+      background: rgba(0, 230, 118, 0.12); color: var(--green);
     }
 
     /* ── TOAST ── */
     #toast {
-      position: fixed; top: 60px; left: 50%; transform: translateX(-50%) translateY(-8px);
-      background: rgba(34,211,238,0.1); border: 1px solid rgba(34,211,238,0.25);
-      color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: 1px;
-      padding: 7px 18px; border-radius: 99px;
+      position: fixed; top: 62px; left: 50%; transform: translateX(-50%) translateY(-8px);
+      background: rgba(6, 12, 22, 0.94); border: 1px solid var(--accent);
+      color: var(--accent); font-family: var(--font-mono);
+      font-size: 11px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase;
+      padding: 7px 18px; clip-path: var(--chamfer-sm);
       opacity: 0; transition: opacity 0.2s, transform 0.2s;
       pointer-events: none; white-space: nowrap; z-index: 100;
       backdrop-filter: blur(12px);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.78);
     }
     #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+    svg.ico {
+      width: 16px; height: 16px; stroke: currentColor; stroke-width: 2;
+      stroke-linecap: square; stroke-linejoin: miter; fill: none;
+      flex-shrink: 0;
+    }
+
     /* ── MOBILE RESPONSIVE ── */
     @media (max-width: 640px) {
+      .hud-telemetry { display: none; }
       header {
         padding: max(8px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) 8px max(10px, env(safe-area-inset-left, 0px));
         gap: 6px;
       }
-      .logo { font-size: 12px; letter-spacing: 3px; }
+      .logo { font-size: 14px; letter-spacing: 3px; }
+      .logo-tag { display: none; }
       .url { display: none !important; }
       .enc-badge { display: none !important; }
-      .pill { padding: 4px 7px; font-size: 8px; letter-spacing: 1px; }
+      .pill { padding: 4px 8px; font-size: 11px; letter-spacing: 1px; }
       #tts-txt { display: none; }
-      #tts-toggle { padding: 4px 8px; }
-      #install-btn { padding: 4px 8px; font-size: 9px; letter-spacing: 1px; }
-      #viz-container { width: min(68vw, 290px); height: min(68vw, 290px); }
-      main { padding: 65px 12px 75px; gap: 10px; }
-      .msg { max-width: 88%; font-size: 13px; line-height: 1.5; padding: 10px 13px; border-radius: 12px; }
+      #tts-toggle { padding: 5px 8px; }
+      #install-btn { padding: 4px 8px; font-size: 11px; letter-spacing: 1px; }
+      #viz-container { width: min(72vw, 300px); height: min(72vw, 300px); }
+      main { padding: 65px 12px 78px; gap: 10px; }
+      .msg { max-width: 90%; font-size: 14px; line-height: 1.5; padding: 10px 14px; }
       footer {
         padding: 8px max(10px, env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
         gap: 6px;
       }
-      #inp { font-size: 16px !important; padding: 10px 12px; border-radius: 12px; }
-      .btn { padding: 10px 12px; border-radius: 12px; font-size: 11px; }
-      #mic-btn, .btn-attach { padding: 10px 12px; font-size: 15px; border-radius: 12px; }
+      #inp { font-size: 16px !important; padding: 10px 12px; }
+      .btn { padding: 11px 14px; font-size: 11px; }
+      #mic-btn, .btn-attach { width: 42px; height: 42px; }
     }
   </style>
 </head>
 <body>
   <div id="toast"></div>
 
+  <!-- PERIPHERAL TACTICAL TELEMETRY -->
+  <div class="hud-telemetry hud-tl">
+    <div>SYS // <span class="hi">MK-XLVIII COMBAT CORE</span></div>
+    <div>LINK // <span id="hud-link-mode" class="hi">FULL-DUPLEX PCM16</span></div>
+  </div>
+  <div class="hud-telemetry hud-tr">
+    <div>LOCK // <span id="hud-wake-state" class="hi">SENTINEL ARMED</span></div>
+    <div id="hud-clock">UTC // 00:00:00</div>
+  </div>
+  <div class="hud-telemetry hud-bl">
+    <div>GRID // <span class="crim">TACTICAL OVERWATCH</span></div>
+    <div>MCP // <span class="hi">17 TOOLS ONLINE</span></div>
+  </div>
+  <div class="hud-telemetry hud-br">
+    <div>AUDIO // <span id="hud-db" class="hi">-60.0 dBFS</span></div>
+    <div>CIPHER // <span class="crim">AES-256-CBC</span></div>
+  </div>
+
   <!-- PWA INSTALL MODAL -->
   <div id="install-modal" class="modal-backdrop" onclick="if(event.target === this) closeInstallModal()">
     <div class="modal-card">
       <div class="modal-header">
-        <div class="modal-title">📲 Install JARVIS App</div>
-        <button class="modal-close" onclick="closeInstallModal()">✕</button>
+        <div class="modal-title">Deploy Standalone HUD</div>
+        <button class="modal-close" onclick="closeInstallModal()" aria-label="Close modal">ESC</button>
       </div>
-      <p class="modal-sub">Install JARVIS on your device for a full-screen standalone experience with direct mic access.</p>
+      <p class="modal-sub">Install the J.A.R.V.I.S. tactical interface as a dedicated full-screen system application with direct low-latency microphone access.</p>
 
       <div class="install-tabs">
-        <button id="tab-btn-ios" class="tab-btn active" onclick="showInstallTab('ios')">🍎 iPhone / iPad</button>
-        <button id="tab-btn-android" class="tab-btn" onclick="showInstallTab('android')">🤖 Android / Chrome</button>
+        <button id="tab-btn-ios" class="tab-btn active" onclick="showInstallTab('ios')">iOS // Safari</button>
+        <button id="tab-btn-android" class="tab-btn" onclick="showInstallTab('android')">Android // Chrome</button>
       </div>
 
       <div id="tab-content-ios" class="tab-content active">
         <div class="install-step">
           <div class="step-num">1</div>
-          <div class="step-txt">Tap the <strong>Share</strong> button at the bottom of Safari (the square with an arrow: <span class="badge-icon">⎋</span>).</div>
+          <div class="step-txt">Tap the <strong>Share</strong> control at the bottom of Safari (<span class="badge-icon">SHARE</span>).</div>
         </div>
         <div class="install-step">
           <div class="step-num">2</div>
-          <div class="step-txt">Scroll down the options and tap <strong>"Add to Home Screen"</strong> (<span class="badge-icon">➕</span>).</div>
+          <div class="step-txt">Select <strong>"Add to Home Screen"</strong> (<span class="badge-icon">+ HOME</span>).</div>
         </div>
         <div class="install-step">
           <div class="step-num">3</div>
-          <div class="step-txt">Tap <strong>"Add"</strong> in the top-right corner. JARVIS will appear as a standalone app on your home screen!</div>
+          <div class="step-txt">Tap <strong>"Add"</strong> in the top-right corner to launch JARVIS in standalone HUD mode.</div>
         </div>
       </div>
 
       <div id="tab-content-android" class="tab-content">
         <div class="install-step">
           <div class="step-num">1</div>
-          <div class="step-txt">Tap the <strong>three vertical dots (⋮)</strong> in the top-right corner of Chrome.</div>
+          <div class="step-txt">Open the browser menu in the top-right corner of Chrome (<span class="badge-icon">MENU</span>).</div>
         </div>
         <div class="install-step">
           <div class="step-num">2</div>
@@ -481,18 +681,21 @@
         </div>
         <div class="install-step">
           <div class="step-num">3</div>
-          <div class="step-txt">Confirm by tapping <strong>"Install"</strong>. JARVIS will be added to your app drawer!</div>
+          <div class="step-txt">Confirm installation to deploy JARVIS to your device launcher.</div>
         </div>
-        <button id="native-install-btn" class="btn btn-send" onclick="triggerNativeInstall()" style="width:100%;margin-top:14px;padding:12px;font-size:12px;display:none;">⚡ Install Directly Now</button>
+        <button id="native-install-btn" class="btn btn-send" onclick="triggerNativeInstall()" style="width:100%;margin-top:14px;padding:12px;font-size:12px;display:none;">Deploy Directly Now</button>
       </div>
     </div>
   </div>
 
   <header>
-    <div class="logo"><em>J</em>ARVIS</div>
+    <div class="brand-cluster">
+      <div class="logo"><em>J</em>.A.R.V.I.S</div>
+      <span class="logo-tag">MK-XLVIII</span>
+    </div>
     <div class="pill" id="pill"><span class="dot"></span><span id="st">Connecting</span></div>
-    <button class="pill" id="linkedin-btn" onclick="connectLinkedIn()" style="cursor:pointer;font-weight:800;font-size:12px;min-width:30px;justify-content:center;" title="Connect LinkedIn" aria-label="Connect LinkedIn">in</button>
-    <button class="pill" id="install-btn" onclick="openInstallModal()" style="display:inline-flex;cursor:pointer;background:rgba(34,211,238,0.12);border:1px solid rgba(34,211,238,0.3);color:var(--accent);font-weight:700;" title="Install JARVIS App">📲 INSTALL</button>
+    <button class="pill" id="linkedin-btn" onclick="connectLinkedIn()" style="cursor:pointer;font-weight:700;font-size:11px;min-width:34px;justify-content:center;" title="Connect LinkedIn" aria-label="Connect LinkedIn">IN</button>
+    <button class="pill" id="install-btn" onclick="openInstallModal()" style="display:inline-flex;cursor:pointer;background:rgba(0,240,255,0.10);border:1px solid rgba(0,240,255,0.35);color:var(--accent);font-weight:700;" title="Install JARVIS App">DEPLOY HUD</button>
     <div class="enc-badge" id="enc">AES-256</div>
     <div class="spacer"></div>
     <div class="url">__IP__:__PORT__</div>
@@ -500,33 +703,66 @@
 
   <main id="feed"></main>
 
-  <!-- HOLOGRAPHIC VISUALIZER -->
+  <!-- MARK XLVIII TACTICAL TARGETING CORE VISUALIZER -->
   <div id="viz-layer">
     <div id="viz-container">
+      <div class="reticle-bracket rb-tl"></div>
+      <div class="reticle-bracket rb-tr"></div>
+      <div class="reticle-bracket rb-bl"></div>
+      <div class="reticle-bracket rb-br"></div>
       <div id="viz-energy-aura"></div>
       <div id="viz-tech-ring-outer"></div>
       <div id="viz-tech-ring-inner"></div>
       <div id="viz-ring"></div>
       <canvas id="viz-canvas"></canvas>
-      <div id="viz-status">Awaiting input</div>
+      <div id="viz-status">Awaiting Command</div>
       <div id="tts-area">
-        <button id="tts-toggle" onclick="toggleTTS()" title="Toggle voice output">🔊 <span id="tts-txt">VOICE ON</span></button>
+        <button id="tts-toggle" onclick="toggleTTS()" title="Toggle voice output" aria-label="Toggle voice output">
+          <svg class="ico" viewBox="0 0 24 24" style="width:13px;height:13px"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+          <span id="tts-txt">VOICE ON</span>
+        </button>
       </div>
     </div>
   </div>
 
   <footer>
-    <input id="inp" placeholder="Ask JARVIS…" autocomplete="off">
-    <label class="btn-attach" for="file-inp" title="Send file">📎</label>
+    <input id="inp" placeholder="ENTER DIRECTIVE OR VOICE OVERRIDE…" autocomplete="off" aria-label="Command input">
+    <label class="btn-attach" for="file-inp" title="Transmit file" aria-label="Transmit file">
+      <svg class="ico" viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+    </label>
     <input type="file" id="file-inp" multiple accept="*/*" style="display:none">
-    <button id="mic-btn" onclick="doMic()" title="Voice command">🎤</button>
+    <button id="mic-btn" onclick="doMic()" title="Voice — tap to speak" aria-label="Toggle microphone">
+      <svg class="ico" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="11" rx="1"/><path d="M5 10v2a7 7 0 0 0 14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
+    </button>
     <button class="btn btn-wake" id="wake" onclick="doWake()">WAKE</button>
-    <button class="btn btn-send" id="send-btn" onclick="doSend()">SEND</button>
+    <button class="btn btn-send" id="send-btn" onclick="doSend()">EXECUTE</button>
   </footer>
 
   <script>
     /* ═══════════════════════════════════════════════════════════════════════
-       PARTICLE VISUALIZER — holographic sphere with ambient motion
+       HUD TELEMETRY CLOCK & AUDIO ENERGY METER
+       ═══════════════════════════════════════════════════════════════════════ */
+    window._jarvisAudioEnergy = 0;
+    (function initHudClock() {
+      const clockEl = document.getElementById('hud-clock');
+      const dbEl = document.getElementById('hud-db');
+      setInterval(() => {
+        if (clockEl) {
+          const now = new Date();
+          const iso = now.toISOString().slice(11, 19);
+          clockEl.textContent = `UTC // ${iso}`;
+        }
+        if (dbEl) {
+          const e = window._jarvisAudioEnergy || 0;
+          const db = e > 0.001 ? Math.max(-58, Math.min(0, 20 * Math.log10(e))).toFixed(1) : '-60.0';
+          dbEl.textContent = `${db} dBFS`;
+          window._jarvisAudioEnergy *= 0.78;
+        }
+      }, 200);
+    })();
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       MARK XLVIII TACTICAL TARGETING CORE VISUALIZER
        ═══════════════════════════════════════════════════════════════════════ */
     (function initVisualizer() {
       const canvas = document.getElementById('viz-canvas');
@@ -538,8 +774,9 @@
       let _vizActive = true;
       const _arcs = [];
 
-      const PARTICLE_COUNT = 135;
-      const ORBIT_PARTICLES = 45;
+      const PARTICLE_COUNT = 140;
+      const ORBIT_PARTICLES = 48;
+      const SPECTRUM_BARS = 64;
 
       function resize() {
         const dpr = window.devicePixelRatio || 1;
@@ -555,37 +792,36 @@
 
       function createParticles() {
         particles = [];
-        // Inner sphere particles
         for (let i = 0; i < PARTICLE_COUNT; i++) {
           const theta = Math.random() * Math.PI * 2;
           const phi = Math.acos(2 * Math.random() - 1);
-          const r = Math.random() * 0.88;
-          const isSpark = Math.random() < 0.16;
+          const r = 0.22 + Math.random() * 0.68;
+          const isSpark = Math.random() < 0.22;
           particles.push({
             type: 'sphere',
             theta, phi, r,
-            speed: (0.0006 + Math.random() * 0.0012) * (Math.random() < 0.5 ? 1 : -1),
-            drift: (Math.random() - 0.5) * 0.0004,
-            size: isSpark ? (1.8 + Math.random() * 2.2) : (1.1 + Math.random() * 2.2),
-            alpha: 0.45 + Math.random() * 0.5,
+            speed: (0.0008 + Math.random() * 0.0018) * (Math.random() < 0.5 ? 1 : -1),
+            drift: (Math.random() - 0.5) * 0.0006,
+            size: isSpark ? (1.8 + Math.random() * 2.4) : (1.1 + Math.random() * 2.0),
+            alpha: 0.48 + Math.random() * 0.5,
             pulse: Math.random() * Math.PI * 2,
-            pulseSpeed: 0.015 + Math.random() * 0.02,
+            pulseSpeed: 0.018 + Math.random() * 0.025,
             isSpark,
           });
         }
-        // Orbit ring particles
         for (let i = 0; i < ORBIT_PARTICLES; i++) {
           const angle = (i / ORBIT_PARTICLES) * Math.PI * 2;
           particles.push({
             type: 'orbit',
             angle,
-            speed: 0.0035 + Math.random() * 0.004,
-            size: 1.0 + Math.random() * 1.5,
-            alpha: 0.25 + Math.random() * 0.45,
-            orbitR: 0.93 + Math.random() * 0.06,
+            speed: (0.004 + Math.random() * 0.005) * (i % 2 === 0 ? 1 : -1),
+            size: 1.1 + Math.random() * 1.6,
+            alpha: 0.35 + Math.random() * 0.5,
+            orbitR: 0.92 + Math.random() * 0.08,
             wobble: Math.random() * Math.PI * 2,
-            wobbleSpeed: 0.006 + Math.random() * 0.012,
-            wobbleAmp: 0.012 + Math.random() * 0.025,
+            wobbleSpeed: 0.008 + Math.random() * 0.014,
+            wobbleAmp: 0.012 + Math.random() * 0.024,
+            isCrimson: i % 4 === 0,
           });
         }
       }
@@ -598,48 +834,110 @@
         const micElem = document.getElementById('mic-btn');
         const isRecording = (micElem && micElem.classList.contains('recording')) || false;
         const isExcited = isSpeaking || isRecording;
-        const speedMult = isSpeaking ? 2.5 : (isRecording ? 1.8 : 1.0);
-        const pulseMult = isSpeaking ? 2.2 : (isRecording ? 1.6 : 1.0);
+        const audioEnergy = Math.min(1, (window._jarvisAudioEnergy || 0) * 2.4);
+        const speedMult = isSpeaking ? (2.8 + audioEnergy * 1.8) : (isRecording ? 2.4 : 1.0);
+        const pulseMult = isSpeaking ? 2.6 : (isRecording ? 2.0 : 1.0);
 
-        // Radiant Arc Reactor plasma core
-        const coreR = radius * (0.32 + (isExcited ? 0.09 : 0.03) * Math.sin(time * 0.0035));
+        document.body.classList.toggle('combat-lock', isRecording);
+
+        const priRGB = isRecording ? '255, 42, 60' : '0, 240, 255';
+        const secRGB = isRecording ? '255, 138, 0' : '255, 42, 60';
+
+        // 1. Radiant Arc Reactor / Combat Plasma Core
+        const dynamicPulse = isSpeaking
+          ? (0.08 + audioEnergy * 0.14) * Math.sin(time * 0.008)
+          : (isRecording ? 0.08 * Math.sin(time * 0.006) : 0.03 * Math.sin(time * 0.0035));
+        const coreR = radius * (0.34 + dynamicPulse);
         const coreGrad = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, coreR);
-        coreGrad.addColorStop(0, isExcited ? 'rgba(255, 255, 255, 0.95)' : 'rgba(224, 247, 250, 0.75)');
-        coreGrad.addColorStop(0.25, isExcited ? 'rgba(56, 189, 248, 0.85)' : 'rgba(56, 189, 248, 0.52)');
-        coreGrad.addColorStop(0.6, isExcited ? 'rgba(6, 182, 212, 0.45)' : 'rgba(6, 182, 212, 0.24)');
-        coreGrad.addColorStop(0.85, 'rgba(14, 116, 144, 0.1)');
+        coreGrad.addColorStop(0, isExcited ? 'rgba(255, 255, 255, 0.98)' : 'rgba(235, 252, 255, 0.82)');
+        coreGrad.addColorStop(0.28, `rgba(${priRGB}, ${isExcited ? 0.88 : 0.56})`);
+        coreGrad.addColorStop(0.62, `rgba(${secRGB}, ${isExcited ? 0.42 : 0.18})`);
         coreGrad.addColorStop(1, 'transparent');
         ctx2d.fillStyle = coreGrad;
         ctx2d.beginPath();
         ctx2d.arc(cx, cy, coreR, 0, Math.PI * 2);
         ctx2d.fill();
 
-        // Ambient outer energy aura
-        const outerGrad = ctx2d.createRadialGradient(cx, cy, radius * 0.15, cx, cy, radius * (isExcited ? 1.28 : 1.14));
-        outerGrad.addColorStop(0, isExcited ? 'rgba(34, 211, 238, 0.18)' : 'rgba(34, 211, 238, 0.09)');
-        outerGrad.addColorStop(0.45, isExcited ? 'rgba(14, 165, 233, 0.08)' : 'rgba(14, 165, 233, 0.035)');
-        outerGrad.addColorStop(0.8, isExcited ? 'rgba(6, 182, 212, 0.03)' : 'rgba(6, 182, 212, 0.01)');
-        outerGrad.addColorStop(1, 'transparent');
-        ctx2d.fillStyle = outerGrad;
-        ctx2d.beginPath();
-        ctx2d.arc(cx, cy, radius * (isExcited ? 1.28 : 1.14), 0, Math.PI * 2);
-        ctx2d.fill();
-
-        // 3D holographic equator ring
+        // 2. Ballistic 72-tick degree dial & cardinal crosshairs
         ctx2d.save();
         ctx2d.translate(cx, cy);
-        ctx2d.rotate(0.25 + Math.sin(time * 0.0008) * 0.05);
-        ctx2d.scale(1, 0.32);
-        ctx2d.beginPath();
-        ctx2d.arc(0, 0, radius * 1.01, 0, Math.PI * 2);
-        ctx2d.strokeStyle = isExcited ? 'rgba(165, 243, 252, 0.45)' : 'rgba(34, 211, 238, 0.22)';
-        ctx2d.lineWidth = 1.4;
-        ctx2d.setLineDash([4, 10, 16, 8]);
-        ctx2d.stroke();
-        ctx2d.setLineDash([]);
+        ctx2d.rotate(time * 0.00025 * (isRecording ? -2.2 : 1));
+        const dialR = radius * 1.04;
+        for (let i = 0; i < 72; i++) {
+          const ang = (i / 72) * Math.PI * 2;
+          const isCardinal = i % 18 === 0;
+          const isMajor = i % 6 === 0;
+          const innerTick = isCardinal ? dialR * 0.89 : (isMajor ? dialR * 0.93 : dialR * 0.965);
+          ctx2d.beginPath();
+          ctx2d.moveTo(Math.cos(ang) * innerTick, Math.sin(ang) * innerTick);
+          ctx2d.lineTo(Math.cos(ang) * dialR, Math.sin(ang) * dialR);
+          ctx2d.strokeStyle = isCardinal
+            ? `rgba(${secRGB}, 0.85)`
+            : `rgba(${priRGB}, ${isMajor ? 0.48 : 0.22})`;
+          ctx2d.lineWidth = isCardinal ? 2.0 : (isMajor ? 1.3 : 0.8);
+          ctx2d.stroke();
+        }
         ctx2d.restore();
 
-        // Project and render sphere particles + synaptic neural links
+        // 3. Radial 64-bar ballistic audio waveform spectrum ring
+        ctx2d.save();
+        ctx2d.translate(cx, cy);
+        const baseSpecR = radius * 0.76;
+        for (let i = 0; i < SPECTRUM_BARS; i++) {
+          const ang = (i / SPECTRUM_BARS) * Math.PI * 2 - Math.PI / 2;
+          const wave = Math.abs(Math.sin(i * 0.35 + time * 0.006 * speedMult) * Math.cos(i * 0.18 - time * 0.004));
+          const amp = isSpeaking
+            ? (0.04 + (0.14 + audioEnergy * 0.22) * wave)
+            : (isRecording ? (0.03 + 0.11 * wave) : (0.015 + 0.028 * wave));
+          const r1 = baseSpecR - radius * amp * 0.35;
+          const r2 = baseSpecR + radius * amp;
+          ctx2d.beginPath();
+          ctx2d.moveTo(Math.cos(ang) * r1, Math.sin(ang) * r1);
+          ctx2d.lineTo(Math.cos(ang) * r2, Math.sin(ang) * r2);
+          const isPeak = amp > 0.11;
+          ctx2d.strokeStyle = isPeak
+            ? `rgba(${secRGB}, 0.88)`
+            : `rgba(${priRGB}, ${isExcited ? 0.65 : 0.32})`;
+          ctx2d.lineWidth = isExcited ? 2.1 : 1.4;
+          ctx2d.stroke();
+        }
+        ctx2d.restore();
+
+        // 4. Dual counter-rotating 3D gyroscope rings
+        for (let ringIdx = 0; ringIdx < 2; ringIdx++) {
+          ctx2d.save();
+          ctx2d.translate(cx, cy);
+          const dir = ringIdx === 0 ? 1 : -1;
+          ctx2d.rotate(dir * (0.35 + time * 0.0007 * speedMult));
+          ctx2d.scale(1, ringIdx === 0 ? 0.34 : 0.46);
+          ctx2d.beginPath();
+          ctx2d.arc(0, 0, radius * (ringIdx === 0 ? 0.98 : 0.68), 0, Math.PI * 2);
+          ctx2d.strokeStyle = ringIdx === 0
+            ? `rgba(${priRGB}, ${isExcited ? 0.55 : 0.28})`
+            : `rgba(${secRGB}, ${isExcited ? 0.52 : 0.24})`;
+          ctx2d.lineWidth = 1.5;
+          ctx2d.setLineDash([8, 12, 22, 10]);
+          ctx2d.stroke();
+          ctx2d.setLineDash([]);
+          ctx2d.restore();
+        }
+
+        // 5. Center tactical crosshair reticle
+        ctx2d.save();
+        ctx2d.translate(cx, cy);
+        const chR = radius * 0.20;
+        ctx2d.strokeStyle = `rgba(${secRGB}, ${isExcited ? 0.72 : 0.38})`;
+        ctx2d.lineWidth = 1.2;
+        ctx2d.beginPath();
+        ctx2d.arc(0, 0, chR, 0, Math.PI * 2);
+        ctx2d.moveTo(-chR * 1.45, 0); ctx2d.lineTo(-chR * 0.65, 0);
+        ctx2d.moveTo(chR * 0.65, 0);  ctx2d.lineTo(chR * 1.45, 0);
+        ctx2d.moveTo(0, -chR * 1.45); ctx2d.lineTo(0, -chR * 0.65);
+        ctx2d.moveTo(0, chR * 0.65);  ctx2d.lineTo(0, chR * 1.45);
+        ctx2d.stroke();
+        ctx2d.restore();
+
+        // 6. Project and render 3D sphere particles + synaptic neural links
         const projected = [];
         for (const p of particles) {
           if (p.type === 'sphere') {
@@ -653,38 +951,36 @@
             const y3d = p.r * sinPhi * Math.sin(p.theta);
             const z3d = p.r * cosPhi;
 
-            const scale = 1 / (1.75 - z3d * 0.45);
+            const scale = 1 / (1.72 - z3d * 0.46);
             const px = cx + x3d * radius * scale;
             const py = cy + y3d * radius * scale;
-            const depth = (z3d + 1) / 2; // 0 to 1
-            const a = p.alpha * (0.35 + depth * 0.65) * (0.7 + 0.3 * Math.sin(p.pulse));
-            const s = p.size * scale * (0.85 + 0.2 * Math.sin(p.pulse));
+            const depth = (z3d + 1) / 2;
+            const a = p.alpha * (0.38 + depth * 0.62) * (0.72 + 0.28 * Math.sin(p.pulse));
+            const s = p.size * scale * (0.85 + 0.22 * Math.sin(p.pulse));
 
             projected.push({ px, py, s, a, depth, isSpark: p.isSpark, scale });
           }
         }
 
-        // Synaptic neural links between nearby particle nodes
-        const maxDist = radius * 0.26;
+        // Synaptic neural links
+        const maxDist = radius * 0.27;
         const pLen = projected.length;
         for (let i = 0; i < pLen; i++) {
           const p1 = projected[i];
           const checkLimit = Math.min(i + 12, pLen);
           for (let j = i + 1; j < checkLimit; j++) {
             const p2 = projected[j];
-            const dx = p1.px - p2.px;
-            const dy = p1.py - p2.py;
-            const dist = Math.hypot(dx, dy);
+            const dist = Math.hypot(p1.px - p2.px, p1.py - p2.py);
             if (dist < maxDist) {
-              const lineAlpha = (1 - dist / maxDist) * 0.28 * Math.min(p1.a, p2.a);
-              if (lineAlpha > 0.02) {
+              const lineAlpha = (1 - dist / maxDist) * 0.32 * Math.min(p1.a, p2.a);
+              if (lineAlpha > 0.025) {
                 ctx2d.beginPath();
                 ctx2d.moveTo(p1.px, p1.py);
                 ctx2d.lineTo(p2.px, p2.py);
                 ctx2d.strokeStyle = isExcited
-                  ? `rgba(165, 243, 252, ${lineAlpha * 1.5})`
-                  : `rgba(34, 211, 238, ${lineAlpha})`;
-                ctx2d.lineWidth = (p1.scale + p2.scale) * 0.4;
+                  ? `rgba(${priRGB}, ${Math.min(0.9, lineAlpha * 1.7)})`
+                  : `rgba(${priRGB}, ${lineAlpha})`;
+                ctx2d.lineWidth = (p1.scale + p2.scale) * 0.42;
                 ctx2d.stroke();
               }
             }
@@ -696,15 +992,16 @@
           ctx2d.beginPath();
           ctx2d.arc(p.px, p.py, p.s, 0, Math.PI * 2);
           ctx2d.fillStyle = p.isSpark
-            ? `rgba(240, 253, 250, ${Math.min(1, p.a * 1.3)})`
-            : `rgba(34, 211, 238, ${p.a})`;
+            ? `rgba(${secRGB}, ${Math.min(1, p.a * 1.35)})`
+            : `rgba(${priRGB}, ${p.a})`;
           ctx2d.fill();
 
-          // Radiant halo for brighter particles
-          if (p.a > 0.3) {
+          if (p.a > 0.32) {
             ctx2d.beginPath();
-            ctx2d.arc(p.px, p.py, p.s * 2.6, 0, Math.PI * 2);
-            ctx2d.fillStyle = `rgba(56, 189, 248, ${p.a * 0.22})`;
+            ctx2d.arc(p.px, p.py, p.s * 2.5, 0, Math.PI * 2);
+            ctx2d.fillStyle = p.isSpark
+              ? `rgba(${secRGB}, ${p.a * 0.24})`
+              : `rgba(${priRGB}, ${p.a * 0.22})`;
             ctx2d.fill();
           }
         }
@@ -717,45 +1014,42 @@
             const oR = radius * (p.orbitR + Math.sin(p.wobble) * p.wobbleAmp);
             const px = cx + Math.cos(p.angle) * oR;
             const py = cy + Math.sin(p.angle) * oR;
+            const orbRGB = p.isCrimson ? secRGB : priRGB;
 
             ctx2d.beginPath();
             ctx2d.arc(px, py, p.size, 0, Math.PI * 2);
-            ctx2d.fillStyle = `rgba(56, 189, 248, ${p.alpha * (0.65 + 0.35 * Math.sin(p.wobble))})`;
-            ctx2d.fill();
-
-            // Subtle trail / glow on orbiters
-            ctx2d.beginPath();
-            ctx2d.arc(px, py, p.size * 2.2, 0, Math.PI * 2);
-            ctx2d.fillStyle = `rgba(34, 211, 238, ${p.alpha * 0.16})`;
+            ctx2d.fillStyle = `rgba(${orbRGB}, ${p.alpha * (0.68 + 0.32 * Math.sin(p.wobble))})`;
             ctx2d.fill();
           }
         }
 
-        // Random micro energy lightning arcs
-        if (Math.random() < (isExcited ? 0.22 : 0.04) && projected.length > 2) {
+        // High-voltage plasma lightning arcs
+        if (Math.random() < (isExcited ? 0.34 : 0.06) && projected.length > 2) {
           const idxA = Math.floor(Math.random() * projected.length);
-          const idxB = (idxA + 1 + Math.floor(Math.random() * 8)) % projected.length;
+          const idxB = (idxA + 1 + Math.floor(Math.random() * 9)) % projected.length;
           const pA = projected[idxA];
           const pB = projected[idxB];
           _arcs.push({
             x1: pA.px, y1: pA.py,
             x2: pB.px, y2: pB.py,
             life: 1.0,
-            decay: 0.18 + Math.random() * 0.12
+            decay: 0.16 + Math.random() * 0.12,
+            crimson: Math.random() < 0.45,
           });
         }
 
-        // Draw and update micro energy arcs
         for (let i = _arcs.length - 1; i >= 0; i--) {
           const arc = _arcs[i];
-          const mx = (arc.x1 + arc.x2) / 2 + (Math.random() - 0.5) * 12;
-          const my = (arc.y1 + arc.y2) / 2 + (Math.random() - 0.5) * 12;
+          const mx = (arc.x1 + arc.x2) / 2 + (Math.random() - 0.5) * 15;
+          const my = (arc.y1 + arc.y2) / 2 + (Math.random() - 0.5) * 15;
           ctx2d.beginPath();
           ctx2d.moveTo(arc.x1, arc.y1);
           ctx2d.lineTo(mx, my);
           ctx2d.lineTo(arc.x2, arc.y2);
-          ctx2d.strokeStyle = `rgba(224, 247, 250, ${arc.life * 0.8})`;
-          ctx2d.lineWidth = 1.2;
+          ctx2d.strokeStyle = arc.crimson
+            ? `rgba(${secRGB}, ${arc.life * 0.9})`
+            : `rgba(235, 252, 255, ${arc.life * 0.85})`;
+          ctx2d.lineWidth = 1.35;
           ctx2d.stroke();
           arc.life -= arc.decay;
           if (arc.life <= 0) _arcs.splice(i, 1);
@@ -764,7 +1058,6 @@
         _vizFrame = requestAnimationFrame(draw);
       }
 
-      // Expose for status sync
       window._vizSetStatus = function(text) {
         if (vizStatus) vizStatus.textContent = text;
       };
@@ -774,7 +1067,6 @@
       _vizFrame = requestAnimationFrame(draw);
       window.addEventListener('resize', () => { resize(); createParticles(); });
 
-      // Pause animation when tab hidden for battery
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
           _vizActive = true;
@@ -877,7 +1169,7 @@
         _deferredInstallPrompt.userChoice.then((choice) => {
           if (choice.outcome === 'accepted') {
             closeInstallModal();
-            toast('JARVIS app installed!');
+            toast('JARVIS HUD DEPLOYED');
           }
           _deferredInstallPrompt = null;
         });
@@ -886,27 +1178,6 @@
 
     function installPWA() {
       openInstallModal();
-    }
-
-    function old_installPWA() {
-      if (_deferredInstallPrompt) {
-        _deferredInstallPrompt.prompt();
-        _deferredInstallPrompt.userChoice.then((choice) => {
-          if (choice.outcome === 'accepted') {
-            const btn = document.getElementById('install-btn');
-            if (btn) btn.style.display = 'none';
-            toast('JARVIS app installed!');
-          }
-          _deferredInstallPrompt = null;
-        });
-      } else {
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-        if (isIOS) {
-          toast('Tap Safari Share (Share icon), then "Add to Home Screen"');
-        } else {
-          toast('Tap browser menu (3 dots), then "Install app"');
-        }
-      }
     }
 
     // ── Auth — bearer token ───────────────────────────────────────────────────
@@ -986,9 +1257,9 @@
         const res = await _authFetch('/api/linkedin/status');
         const data = await res.json();
         _linkedinConnected = Boolean(data.connected);
-        btn.style.background = _linkedinConnected ? 'rgba(10,102,194,0.28)' : 'rgba(148,163,184,0.08)';
-        btn.style.borderColor = _linkedinConnected ? '#0a66c2' : 'var(--border)';
-        btn.style.color = _linkedinConnected ? '#7dc4ff' : 'var(--muted)';
+        btn.style.background = _linkedinConnected ? 'rgba(0, 240, 255, 0.14)' : 'var(--surface)';
+        btn.style.borderColor = _linkedinConnected ? 'var(--accent)' : 'var(--border)';
+        btn.style.color = _linkedinConnected ? 'var(--accent)' : 'var(--muted)';
         btn.title = _linkedinConnected ? `LinkedIn connected as ${data.name || 'member'}` : 'Connect LinkedIn';
       } catch (_) {
         _linkedinConnected = false;
@@ -1047,7 +1318,7 @@
     const _encReady = _sessionKey ? _initCrypto(_sessionKey) : false;
     const encBadge  = document.getElementById('enc');
     if (_encReady) { encBadge.className = 'enc-badge on'; }
-    else           { encBadge.className = 'enc-badge off'; encBadge.textContent = 'NO ENC'; }
+    else           { encBadge.className = 'enc-badge off'; encBadge.textContent = 'UNENCRYPTED'; }
 
     // ── WebSocket ─────────────────────────────────────────────────────────────
     const feed  = document.getElementById('feed');
@@ -1073,8 +1344,8 @@
         clearTimeout(_reconnectTimer);
         setStatus('starting');
         _connectSpeaker();
-        sys('Connected to JARVIS.');
-        toast('Connected');
+        sys('TACTICAL UPLINK ESTABLISHED.');
+        toast('Uplink Active');
       };
 
       _ws.onclose = async (e) => {
@@ -1104,7 +1375,7 @@
           append(m.speaker, m.text, m.request_id || '');
         }
         if (m.type === 'status')        setStatus(m.state);
-        if (m.type === 'wake')          sys('Wake word detected — connecting…');
+        if (m.type === 'wake')          sys('Wake word detected — engaging core…');
         if (m.type === 'sys')           sys(m.text);
         if (m.type === 'file_received') _onFileReceived(m);
       };
@@ -1122,6 +1393,8 @@
       if (_wakeLockSentinel && !_wakeLockSentinel.released) return;
       try {
         _wakeLockSentinel = await navigator.wakeLock.request('screen');
+        const wlEl = document.getElementById('hud-wake-state');
+        if (wlEl) wlEl.textContent = 'SENTINEL LOCKED';
         _wakeLockSentinel.addEventListener('release', () => {
           if (document.visibilityState === 'visible') {
             setTimeout(_requestWakeLock, 500);
@@ -1136,7 +1409,7 @@
         const silentBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
         const ch = silentBuf.getChannelData(0);
         for (let i = 0; i < ch.length; i += 64) {
-          ch[i] = 1e-6; // imperceptible non-zero DC pulse prevents mobile WebAudio auto-suspend
+          ch[i] = 1e-6;
         }
         const src = ctx.createBufferSource();
         src.buffer = silentBuf;
@@ -1152,8 +1425,8 @@
       if ('mediaSession' in navigator) {
         try {
           navigator.mediaSession.metadata = new MediaMetadata({
-            title: 'JARVIS — Live Interface',
-            artist: 'Stark HUD',
+            title: 'J.A.R.V.I.S. // MK-XLVIII Tactical Core',
+            artist: 'Stark Combat HUD',
             album: 'JARVIS OS',
           });
           navigator.mediaSession.playbackState = 'playing';
@@ -1183,7 +1456,6 @@
         }
         _connectSpeaker();
       } else {
-        // Keep speaker and voice streams alive even if screen dims or briefly backgrounds
         if (_audioCtx && _audioCtx.state === 'suspended') {
           try { _audioCtx.resume(); } catch (_) {}
         }
@@ -1195,19 +1467,20 @@
         try { _audioCtx.resume(); } catch (_) {}
       }
     });
+
     let _ttsEnabled = true;
     function toggleTTS() {
       _ttsEnabled = !_ttsEnabled;
       const btn = document.getElementById('tts-toggle');
       const txt = document.getElementById('tts-txt');
       if (_ttsEnabled) {
-        btn.style.background = 'rgba(34,197,94,0.12)';
-        btn.style.borderColor = 'rgba(34,197,94,0.25)';
+        btn.style.background = 'rgba(0, 230, 118, 0.12)';
+        btn.style.borderColor = 'rgba(0, 230, 118, 0.35)';
         btn.style.color = 'var(--green)';
         txt.textContent = 'VOICE ON';
         _ensureAudioCtx();
         _connectSpeaker();
-        toast('Voice active');
+        toast('Voice Telemetry Active');
       } else {
         btn.style.background = 'var(--surface)';
         btn.style.borderColor = 'var(--border)';
@@ -1215,7 +1488,7 @@
         txt.textContent = 'MUTED';
         _closeSpeaker();
         if (window.speechSynthesis) window.speechSynthesis.cancel();
-        toast('Voice muted');
+        toast('Voice Telemetry Muted');
       }
     }
 
@@ -1225,22 +1498,22 @@
     function setStatus(s) {
       const vizLabel = window._vizSetStatus;
       if (s === 'active') {
-        pill.className = 'pill on'; stTxt.textContent = 'Active'; wake.classList.remove('show');
-        if (vizLabel) vizLabel('Active');
+        pill.className = 'pill on'; stTxt.textContent = 'Online'; wake.classList.remove('show');
+        if (vizLabel) vizLabel('Combat Core Online');
         _requestWakeLock();
       } else if (s === 'starting') {
-        pill.className = 'pill'; stTxt.textContent = 'Starting'; wake.classList.remove('show');
-        if (vizLabel) vizLabel('Initializing');
+        pill.className = 'pill'; stTxt.textContent = 'Arming'; wake.classList.remove('show');
+        if (vizLabel) vizLabel('Initializing Core');
         _requestWakeLock();
       } else if (s === 'offline') {
         pill.className = 'pill'; stTxt.textContent = 'Offline'; wake.classList.add('show');
-        if (vizLabel) vizLabel('Offline');
+        if (vizLabel) vizLabel('Link Severed');
       } else if (s === 'error') {
-        pill.className = 'pill'; stTxt.textContent = 'Error'; wake.classList.add('show');
-        if (vizLabel) vizLabel('Error');
+        pill.className = 'pill'; stTxt.textContent = 'Fault'; wake.classList.add('show');
+        if (vizLabel) vizLabel('System Fault');
       } else {
-        pill.className = 'pill'; stTxt.textContent = 'Sleeping'; wake.classList.add('show');
-        if (vizLabel) vizLabel('Sleeping');
+        pill.className = 'pill'; stTxt.textContent = 'Standby'; wake.classList.add('show');
+        if (vizLabel) vizLabel('Standby Mode');
       }
     }
 
@@ -1273,10 +1546,10 @@
       feed.querySelectorAll('.msg.latest, .msg-file.latest').forEach(m => m.classList.remove('latest'));
       if (speaker === 'jarvis') {
         d.className = 'msg msg-j latest';
-        d.innerHTML = `<div class="lbl">Jarvis</div>${esc(clean)}`;
+        d.innerHTML = `<div class="lbl">J.A.R.V.I.S // CORE</div>${esc(clean)}`;
       } else {
         d.className = 'msg msg-u latest';
-        d.innerHTML = `<div class="lbl">You</div>${esc(clean)}`;
+        d.innerHTML = `<div class="lbl">OPERATOR // DIRECTIVE</div>${esc(clean)}`;
       }
       feed.appendChild(d);
       feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' });
@@ -1297,16 +1570,16 @@
     // ── File helpers ──────────────────────────────────────────────────────────
     function _fileIcon(name) {
       const ext = (name.split('.').pop() || '').toLowerCase();
-      if (['jpg','jpeg','png','gif','webp','heic','heif','avif','bmp','svg'].includes(ext)) return '🖼️';
-      if (['mp4','mov','avi','mkv','webm','m4v','3gp'].includes(ext))                       return '🎬';
-      if (['mp3','m4a','wav','flac','aac','ogg','opus'].includes(ext))                      return '🎵';
-      if (['pdf'].includes(ext))                                                             return '📋';
-      if (['doc','docx','txt','md','rtf','odt'].includes(ext))                              return '📝';
-      if (['xls','xlsx','csv','ods'].includes(ext))                                         return '📊';
-      if (['ppt','pptx','odp'].includes(ext))                                               return '📑';
-      if (['zip','rar','7z','tar','gz','bz2','xz'].includes(ext))                          return '📦';
-      if (['apk','exe','dmg','deb','rpm','msi'].includes(ext))                              return '⚙️';
-      return '📎';
+      if (['jpg','jpeg','png','gif','webp','heic','heif','avif','bmp','svg'].includes(ext)) return 'IMG';
+      if (['mp4','mov','avi','mkv','webm','m4v','3gp'].includes(ext))                       return 'VID';
+      if (['mp3','m4a','wav','flac','aac','ogg','opus'].includes(ext))                      return 'AUD';
+      if (['pdf'].includes(ext))                                                             return 'PDF';
+      if (['doc','docx','txt','md','rtf','odt'].includes(ext))                              return 'DOC';
+      if (['xls','xlsx','csv','ods'].includes(ext))                                         return 'DAT';
+      if (['ppt','pptx','odp'].includes(ext))                                               return 'DEC';
+      if (['zip','rar','7z','tar','gz','bz2','xz'].includes(ext))                          return 'ARC';
+      if (['apk','exe','dmg','deb','rpm','msi'].includes(ext))                              return 'BIN';
+      return 'PKT';
     }
 
     function _fmtSize(bytes) {
@@ -1327,7 +1600,7 @@
       card.innerHTML = `
         <div class="fc-icon">${_fileIcon(file.name)}</div>
         <div class="fc-meta">
-          <div class="fc-lbl">Sending</div>
+          <div class="fc-lbl">Transmitting Packet</div>
           <div class="fc-name">${esc(file.name)}</div>
           <div class="fc-size">${_fmtSize(file.size)}</div>
           <div class="fc-bar-wrap"><div class="fc-bar" id="${id}_bar"></div></div>
@@ -1360,15 +1633,15 @@
           try { savedName = JSON.parse(xhr.responseText).name || file.name; } catch {}
           const dlUrl = `/uploads/${encodeURIComponent(savedName)}?token=${encodeURIComponent(_authToken)}`;
           if (bar)  { bar.style.width = '100%'; bar.style.background = 'var(--green)'; }
-          if (st)   { st.textContent = '✓'; st.className = 'fc-status done'; }
-          if (lbl)  lbl.textContent = 'Sent';
+          if (st)   { st.textContent = 'OK'; st.className = 'fc-status done'; }
+          if (lbl)  lbl.textContent = 'Transmitted';
           if (meta) meta.insertAdjacentHTML('beforeend',
-            `<a class="fc-dl" href="${dlUrl}" download="${esc(savedName)}">⬇ Download back</a>`);
-          toast('File sent!');
+            `<a class="fc-dl" href="${dlUrl}" download="${esc(savedName)}">RETRIEVE PACKET</a>`);
+          toast('Packet Transmitted');
         } else {
           let errMsg = 'Upload failed';
           try { errMsg = JSON.parse(xhr.responseText).error || errMsg; } catch {}
-          if (bar) bar.style.background = '#f87171';
+          if (bar) bar.style.background = 'var(--crimson)';
           if (st)  { st.textContent = 'ERR'; st.className = 'fc-status err'; }
           if (lbl) lbl.textContent = errMsg;
         }
@@ -1394,16 +1667,16 @@
       card.innerHTML = `
         <div class="fc-icon">${_fileIcon(m.name)}</div>
         <div class="fc-meta">
-          <div class="fc-lbl">Received</div>
+          <div class="fc-lbl">Incoming Packet</div>
           <div class="fc-name">${esc(m.name)}</div>
           <div class="fc-size">${_fmtSize(m.size)}</div>
-          <a class="fc-dl" href="${dlUrl}" download="${esc(m.name)}">⬇ Download</a>
+          <a class="fc-dl" href="${dlUrl}" download="${esc(m.name)}">RETRIEVE PACKET</a>
         </div>
-        <div class="fc-status done">✓</div>
+        <div class="fc-status done">OK</div>
       `;
       feed.appendChild(card);
       feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' });
-      toast('File received!');
+      toast('Incoming Packet');
     }
 
     document.getElementById('file-inp').addEventListener('change', function () {
@@ -1435,7 +1708,6 @@
       const enc  = _encrypt(txt);
       const body = enc ? { enc, request_id: requestId } : { text: txt, request_id: requestId };
 
-      // Fast path: dispatch directly over persistent WebSocket if open (zero HTTP handshake latency)
       if (_ws && _ws.readyState === WebSocket.OPEN) {
         try {
           _ws.send(JSON.stringify(Object.assign({ type: 'command' }, body)));
@@ -1454,7 +1726,7 @@
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
       } catch (_) {
         inp.value = txt;
-        toast('Message could not be sent. Tap SEND to retry.');
+        toast('Transmission failed — retry EXECUTE');
       } finally {
         _textSendInFlight = false;
         if (sendBtn) sendBtn.disabled = false;
@@ -1462,7 +1734,7 @@
     }
 
     function doWake() {
-      sys('Sending wake signal…');
+      sys('Transmitting wake pulse…');
       _authFetch('/api/wake', { method: 'POST' });
     }
 
@@ -1492,20 +1764,23 @@
     let _audioSink = null;
     let _playTime = 0;
 
+    const _SVG_MIC_IDLE = '<svg class="ico" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="11" rx="1"/><path d="M5 10v2a7 7 0 0 0 14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>';
+    const _SVG_MIC_STOP = '<svg class="ico" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"/></svg>';
+
     function _micIdle() {
-      micBtn.innerHTML = '🎤';
+      micBtn.innerHTML = _SVG_MIC_IDLE;
       micBtn.title     = 'Voice — tap to speak';
       micBtn.classList.remove('recording');
     }
 
-    const VOICE_SEND_SAMPLES = 640; // 40ms frames at 16kHz (reduced from 100ms for lower uplink latency)
+    const VOICE_SEND_SAMPLES = 640; // 40ms frames at 16kHz
     const MAX_VOICE_WS_BUFFER = 256 * 1024;
-    const JITTER_BUFFER_SECONDS = 0.025; // 25ms initial jitter buffer (reduced from 80ms for faster speech start)
+    const JITTER_BUFFER_SECONDS = 0.025; // 25ms initial jitter buffer
     let _activeAudioSources = [];
     window._activeAudioSources = _activeAudioSources;
     let _audioProcessChain = Promise.resolve();
     let _playbackGeneration = 0;
-    let _playbackState = 'idle'; // 'idle' | 'playing' | 'stopping'
+    let _playbackState = 'idle';
 
     try {
       _speakerClientId = localStorage.getItem('jarvis_speaker_client_id') || '';
@@ -1529,6 +1804,7 @@
         try { s.stop(); s.disconnect(); } catch (_) {}
       }
       _activeAudioSources = [];
+      window._jarvisAudioEnergy = 0;
       _playbackState = 'idle';
     }
 
@@ -1575,24 +1851,23 @@
       const card = document.createElement('div');
       card.id = 'voice-setup';
       card.style.cssText = [
-        'align-self:stretch', 'background:rgba(34,211,238,0.05)',
-        'border:1px solid rgba(34,211,238,0.15)', 'border-radius:14px',
-        'padding:16px 18px', 'font-size:13px', 'line-height:1.8',
-        'animation:fadeUp 0.2s ease'
+        'align-self:stretch', 'background:rgba(8,14,24,0.88)',
+        'border:1px solid rgba(0,240,255,0.32)', 'padding:16px 18px',
+        'font-size:14px', 'line-height:1.8'
       ].join(';');
       card.innerHTML =
-        '<div style="font-weight:700;color:var(--accent);letter-spacing:.5px;margin-bottom:10px">🎤 One-time voice setup</div>' +
-        '<ol style="padding-left:18px;color:#8899aa;margin:0;display:flex;flex-direction:column;gap:4px">' +
-        '<li>Open a new tab → go to <span style="background:rgba(255,255,255,0.07);padding:1px 6px;border-radius:4px;font-family:monospace;font-size:12px">chrome://flags</span></li>' +
-        '<li>Search: <strong style="color:#dde3ed">Insecure origins treated as secure</strong></li>' +
-        '<li>Paste this URL into the box:<br><span id="flags-url" style="background:rgba(255,255,255,0.07);padding:2px 8px;border-radius:4px;font-family:monospace;font-size:11px;user-select:all;cursor:pointer">' + esc(origin) + '</span></li>' +
-        '<li>Set to <strong style="color:#22c55e">Enabled</strong> → tap <strong style="color:#dde3ed">Relaunch</strong></li>' +
-        '<li>Return here and tap 🎤</li>' +
+        '<div style="font-family:var(--font-display);font-weight:700;color:var(--accent);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px">Voice Telemetry Authorization</div>' +
+        '<ol style="padding-left:18px;color:var(--text);margin:0;display:flex;flex-direction:column;gap:4px">' +
+        '<li>Open a new tab and navigate to <span style="background:rgba(0,240,255,0.1);padding:1px 6px;font-family:var(--font-mono);font-size:12px">chrome://flags</span></li>' +
+        '<li>Search: <strong style="color:var(--text-hi)">Insecure origins treated as secure</strong></li>' +
+        '<li>Paste this origin URL:<br><span id="flags-url" style="background:rgba(0,240,255,0.1);padding:2px 8px;font-family:var(--font-mono);font-size:12px;user-select:all;cursor:pointer;color:var(--accent)">' + esc(origin) + '</span></li>' +
+        '<li>Set to <strong style="color:var(--green)">Enabled</strong> and tap <strong style="color:var(--text-hi)">Relaunch</strong></li>' +
+        '<li>Return here and engage the microphone control.</li>' +
         '</ol>';
       feed.appendChild(card);
       feed.scrollTop = feed.scrollHeight;
       card.querySelector('#flags-url').addEventListener('click', () => {
-        navigator.clipboard?.writeText(origin).then(() => toast('URL copied!')).catch(() => {});
+        navigator.clipboard?.writeText(origin).then(() => toast('Origin URL Copied')).catch(() => {});
       });
     }
 
@@ -1657,7 +1932,7 @@
           if (exp < nowMs) _recentChunkHashes.delete(k);
         }
         if (_recentChunkHashes.has(checksum)) {
-          return; // Drop duplicate playback chunk to prevent overlapping voices
+          return;
         }
         _recentChunkHashes.set(checksum, nowMs + 3000);
 
@@ -1672,9 +1947,13 @@
           if (byteLen <= 0) return;
           const pcm16 = new Int16Array(arrayBuf, 0, byteLen / 2);
           const f32 = new Float32Array(pcm16.length);
+          let sumSq = 0;
           for (let i = 0; i < pcm16.length; i++) {
-            f32[i] = pcm16[i] / 32768.0;
+            const sample = pcm16[i] / 32768.0;
+            f32[i] = sample;
+            sumSq += sample * sample;
           }
+          window._jarvisAudioEnergy = Math.sqrt(sumSq / Math.max(1, pcm16.length));
 
           const buf = ctx.createBuffer(1, f32.length, 24000);
           buf.getChannelData(0).set(f32);
@@ -1698,6 +1977,7 @@
             if (_activeAudioSources.length === 0 && _playbackState === 'playing') {
               _playbackState = 'idle';
               _playTime = 0;
+              window._jarvisAudioEnergy = 0;
             }
           };
         } catch (err) {
@@ -1725,10 +2005,7 @@
     }
 
     function _speakerDesired() {
-      return Boolean(
-        _ttsEnabled &&
-        _authToken
-      );
+      return Boolean(_ttsEnabled && _authToken);
     }
 
     function _connectSpeaker() {
@@ -1811,8 +2088,8 @@
         });
       } catch (e) {
         sys(e.name === 'NotAllowedError'
-          ? 'Microphone denied — tap the address bar lock and allow microphone.'
-          : 'Mic error: ' + e.message);
+          ? 'Microphone access denied — authorize audio input in browser settings.'
+          : 'Mic fault: ' + e.message);
         return;
       }
 
@@ -1895,15 +2172,16 @@
           _audioNd = sp;
         }
 
-        micBtn.innerHTML = '⏹';
-        micBtn.title     = 'Tap to stop';
+        micBtn.innerHTML = _SVG_MIC_STOP;
+        micBtn.title     = 'Tap to disengage voice override';
         micBtn.classList.add('recording');
-        sys('Voice live — speak now');
-        toast('🎤 Live');
+        if (window._vizSetStatus) window._vizSetStatus('Target Lock // Listening');
+        sys('VOICE OVERRIDE ACTIVE — SPEAK DIRECTIVE');
+        toast('Voice Override Engaged');
       };
 
       ws.onclose = () => { _stopVoice(); };
-      ws.onerror = () => { sys('Voice connection failed.'); _stopVoice(); };
+      ws.onerror = () => { sys('Voice uplink interrupted.'); _stopVoice(); };
 
       _voiceWs  = ws;
       _micStm   = stream;
@@ -1918,6 +2196,7 @@
         if (w.readyState < 2) w.close();
       }
       _micIdle();
+      if (window._vizSetStatus) window._vizSetStatus('Combat Core Online');
     }
   </script>
 </body>

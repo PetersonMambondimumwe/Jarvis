@@ -3,113 +3,141 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>JARVIS</title>
+  <title>J.A.R.V.I.S. // SECURITY CLEARANCE</title>
   <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#07090f">
+  <meta name="theme-color" content="#04060A">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="JARVIS">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link rel="icon" type="image/png" href="/static/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Chakra+Petch:wght@600;700&family=IBM+Plex+Mono:wght@500;700&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg:     #07090f;
-      --card:   rgba(255,255,255,0.04);
-      --border: rgba(255,255,255,0.08);
-      --accent: #6366f1;
-      --adim:   rgba(99,102,241,0.15);
-      --text:   #dde3ed;
-      --muted:  #5e6a7e;
+      --bg:      #04060A;
+      --card:    rgba(9, 15, 25, 0.90);
+      --border:  rgba(0, 240, 255, 0.24);
+      --accent:  #00F0FF;
+      --crimson: #FF2A3C;
+      --adim:    rgba(0, 240, 255, 0.10);
+      --text:    #E2ECF6;
+      --muted:   #8499B2;
+      --chamfer: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+      --chamfer-sm: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
     }
+    ::selection { background: rgba(255, 42, 60, 0.32); color: #fff; }
     html, body {
       height: 100%;
-      background: var(--bg);
+      background:
+        radial-gradient(circle at 50% 42%, rgba(0, 240, 255, 0.07) 0%, rgba(255, 42, 60, 0.03) 40%, #04060A 78%),
+        var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: 'Barlow', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 15px;
       display: flex;
       align-items: center;
       justify-content: center;
+      position: relative;
+      overflow: hidden;
     }
     .card {
-      width: 340px;
-      padding: 44px 36px;
+      position: relative;
+      width: 368px;
+      padding: 40px 32px;
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 22px;
+      clip-path: var(--chamfer);
       text-align: center;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(16px);
+      z-index: 2;
+    }
+    .card::before {
+      content: '';
+      position: absolute; top: 0; left: 24px; width: 56px; height: 2px;
+      background: var(--crimson);
     }
     .logo {
+      font-family: 'Chakra Petch', sans-serif;
       font-size: 28px;
       font-weight: 700;
-      letter-spacing: 10px;
+      letter-spacing: 8px;
       margin-bottom: 6px;
+      color: #F4F8FC;
     }
-    .logo em { color: var(--accent); font-style: normal; }
+    .logo em { color: var(--crimson); font-style: normal; }
     .sub {
+      font-family: 'IBM Plex Mono', monospace;
       font-size: 11px;
-      color: var(--muted);
+      color: var(--accent);
       letter-spacing: 3px;
       text-transform: uppercase;
-      margin-bottom: 10px;
+      margin-bottom: 14px;
     }
     .hint {
-      font-size: 12px;
+      font-size: 14px;
       color: var(--muted);
-      line-height: 1.55;
-      margin-bottom: 28px;
+      line-height: 1.6;
+      margin-bottom: 24px;
     }
     .key-wrap {
       position: relative;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
     }
     .key-input {
       width: 100%;
-      padding: 18px 14px;
-      background: rgba(255,255,255,0.05);
-      border: 1.5px solid var(--border);
-      border-radius: 14px;
+      padding: 16px 14px;
+      background: rgba(4, 8, 15, 0.85);
+      border: 1px solid var(--border);
+      clip-path: var(--chamfer-sm);
       color: var(--text);
-      font-size: 30px;
+      font-size: 28px;
       font-weight: 700;
-      font-family: 'Courier New', monospace;
+      font-family: 'IBM Plex Mono', monospace;
+      font-variant-numeric: tabular-nums;
       text-align: center;
       letter-spacing: 10px;
       text-transform: uppercase;
       outline: none;
-      transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
-      caret-color: var(--accent);
+      transition: border-color 0.15s, background 0.15s;
+      caret-color: var(--crimson);
     }
     .key-input::placeholder {
-      color: rgba(94,106,126,0.5);
+      color: var(--muted);
       letter-spacing: 6px;
-      font-size: 20px;
+      font-size: 18px;
     }
     .key-input:focus {
       border-color: var(--accent);
       background: var(--adim);
-      box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
     }
     .err {
+      font-family: 'IBM Plex Mono', monospace;
       font-size: 12px;
-      color: #f87171;
+      color: #FF6B78;
       min-height: 18px;
       margin-bottom: 14px;
+      letter-spacing: 0.8px;
     }
     .btn {
       width: 100%;
       padding: 14px;
-      background: var(--accent);
-      color: #fff;
-      font-size: 12px;
+      background: linear-gradient(135deg, var(--accent) 0%, #00B8D4 100%);
+      color: #04060A;
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 13px;
       font-weight: 700;
       letter-spacing: 3px;
+      text-transform: uppercase;
       border: none;
-      border-radius: 12px;
+      clip-path: var(--chamfer-sm);
       cursor: pointer;
       transition: opacity 0.15s, transform 0.1s;
     }
-    .btn:hover  { opacity: 0.88; }
+    .btn:hover  { opacity: 0.92; }
     .btn:active { transform: scale(0.98); }
     @keyframes shake {
       0%,100% { transform: translateX(0); }
@@ -118,49 +146,52 @@
     }
     .shake { animation: shake 0.35s ease; }
     .voice-note {
-      font-size: 10px;
+      font-size: 14px;
       color: var(--muted);
-      margin-top: 20px;
+      margin-top: 22px;
       line-height: 1.6;
       text-align: left;
+      border-top: 1px solid rgba(0, 240, 255, 0.14);
+      padding-top: 14px;
     }
     .voice-note code {
-      background: rgba(255,255,255,0.07);
-      padding: 1px 4px;
-      border-radius: 3px;
-      font-family: 'Courier New', monospace;
-      font-size: 9px;
+      background: rgba(0, 240, 255, 0.08);
+      color: var(--accent);
+      padding: 1px 5px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
     }
     #reconnecting {
       display: none;
-      color: var(--muted);
+      font-family: 'IBM Plex Mono', monospace;
+      color: var(--accent);
       font-size: 12px;
+      letter-spacing: 1px;
       margin-bottom: 16px;
     }
   </style>
 </head>
 <body>
   <div class="card" id="card">
-    <div class="logo"><em>J</em>ARVIS</div>
-    <div class="sub">Remote Access</div>
-    <p id="reconnecting">Reconnecting…</p>
-    <p class="hint">Press <strong style="color:var(--text)">Remote Control</strong> in the JARVIS desktop app to get a QR code or session key.</p>
+    <div class="logo"><em>J</em>.A.R.V.I.S</div>
+    <div class="sub">MK-XLVIII // Tactical Uplink</div>
+    <p id="reconnecting">ESTABLISHING ENCRYPTED HANDSHAKE…</p>
+    <p class="hint">Enter your 6-character tactical session key or scan the authorization QR from the desktop command terminal.</p>
     <div class="key-wrap">
       <input class="key-input" id="key" type="text" maxlength="6"
              autocomplete="off" autocorrect="off" spellcheck="false"
-             placeholder="· · · · · ·">
+             placeholder="· · · · · ·" aria-label="6-character tactical session key">
     </div>
     <div class="err" id="err"></div>
-    <button class="btn" onclick="doLogin()">CONNECT</button>
+    <button class="btn" onclick="doLogin()">AUTHORIZE UPLINK</button>
     <p class="voice-note">
-      🎤 <strong style="color:var(--text)">Voice commands:</strong> open
-      <code>chrome://flags</code> on your phone, search
-      <code>Insecure origins treated as secure</code>, add your JARVIS URL, tap Relaunch.
+      <strong style="color:var(--text)">VOICE TELEMETRY:</strong> On LAN HTTP origins, open
+      <code>chrome://flags</code>, locate
+      <code>Insecure origins treated as secure</code>, register your JARVIS origin URL, and relaunch.
     </p>
   </div>
 
   <script>
-    // Try auto-reconnect with stored device token (set on first QR login)
     (async function() {
       const devTok = localStorage.getItem('jarvis_device_token');
       if (!devTok) return;
@@ -179,7 +210,6 @@
           return;
         }
       } catch (_) {}
-      // Device token rejected (server restarted) — clear it and show normal form
       localStorage.removeItem('jarvis_device_token');
       document.getElementById('reconnecting').style.display = 'none';
     })();
@@ -205,7 +235,7 @@
         });
         data = await r.json();
       } catch (e) {
-        document.getElementById('err').textContent = 'Connection error';
+        document.getElementById('err').textContent = 'UPLINK CONNECTION FAULT';
         shake(); return;
       }
       if (data.ok && data.token) {
@@ -215,7 +245,7 @@
       } else {
         inp.value = '';
         inp.focus();
-        document.getElementById('err').textContent = 'Invalid or expired key';
+        document.getElementById('err').textContent = 'ACCESS DENIED // INVALID KEY';
         shake();
       }
     }
