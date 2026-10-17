@@ -1745,9 +1745,12 @@ class JarvisLive:
                     continue
                 self.set_speaking(True)
 
-                # Dispatch audio chunk to phone speaker clients concurrently without blocking local soundcard
+                # Broadcast audio chunk to phone dashboard clients sequentially in strict order
                 if self._dashboard:
-                    asyncio.create_task(self._dashboard.broadcast_audio(chunk))
+                    try:
+                        await self._dashboard.broadcast_audio(chunk)
+                    except Exception:
+                        pass
 
                 if stream:
                     try:
@@ -1755,12 +1758,12 @@ class JarvisLive:
                     except (RuntimeError, asyncio.CancelledError):
                         break   # executor shutting down — exit cleanly
                 else:
-                    # In headless server mode, send the first 3 chunks (300ms) with zero delay to fill
-                    # the client's WebAudio buffer immediately, then pace smoothly at 65% of duration.
+                    # In headless server mode, pace audio broadcast slightly ahead of real time (70% of duration)
+                    # so the client's jitter buffer stays comfortably filled and never starves on network jitter.
                     burst_chunks += 1
-                    if burst_chunks > 3:
+                    if burst_chunks > 2:
                         dur = len(chunk) / (RECEIVE_SAMPLE_RATE * 2)
-                        await asyncio.sleep(dur * 0.65)
+                        await asyncio.sleep(dur * 0.70)
         except Exception as e:
             print(f"[JARVIS] ❌ Play: {e}")
             raise

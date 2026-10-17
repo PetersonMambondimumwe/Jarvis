@@ -1827,9 +1827,9 @@
       micBtn.classList.remove('recording');
     }
 
-    const VOICE_SEND_SAMPLES = 640; // 40ms frames at 16kHz
+    const VOICE_SEND_SAMPLES = 960; // 60ms frames at 16kHz
     const MAX_VOICE_WS_BUFFER = 256 * 1024;
-    const JITTER_BUFFER_SECONDS = 0.025; // 25ms initial jitter buffer
+    const JITTER_BUFFER_SECONDS = 0.12; // 120ms jitter buffer prevents mobile Wi-Fi/LTE audio underruns
     let _activeAudioSources = [];
     window._activeAudioSources = _activeAudioSources;
     let _audioProcessChain = Promise.resolve();
@@ -1853,7 +1853,6 @@
       _playbackGeneration++;
       _playTime = 0;
       _audioProcessChain = Promise.resolve();
-      if (typeof _recentChunkHashes !== 'undefined') _recentChunkHashes.clear();
       for (const s of _activeAudioSources) {
         try { s.stop(); s.disconnect(); } catch (_) {}
       }
@@ -1928,7 +1927,7 @@
     function _ensureAudioCtx() {
       if (!_audioCtx) {
         const AC = window.AudioContext || window.webkitAudioContext;
-        _audioCtx = new AC({ latencyHint: 'interactive' });
+        _audioCtx = new AC();
       }
       if (_audioCtx.state === 'suspended') {
         try { _audioCtx.resume(); } catch (_) {}
@@ -1944,18 +1943,6 @@
         _audioSink.connect(ctx.destination);
       }
       return _audioSink;
-    }
-
-    const _recentChunkHashes = new Map();
-    function _chunkChecksum(arrayBuf) {
-      const u8 = new Uint8Array(arrayBuf);
-      let hash = 0x811c9dc5;
-      const step = Math.max(1, Math.floor(u8.length / 32));
-      for (let i = 0; i < u8.length; i += step) {
-        hash ^= u8[i];
-        hash = Math.imul(hash, 0x01000193);
-      }
-      return `${u8.length}:${hash >>> 0}`;
     }
 
     function _playJarvisAudio(data) {
@@ -1980,18 +1967,11 @@
         }
         if (gen !== _playbackGeneration || !(arrayBuf instanceof ArrayBuffer) || arrayBuf.byteLength <= 0) return;
 
-        const nowMs = Date.now();
-        const checksum = _chunkChecksum(arrayBuf);
-        for (const [k, exp] of _recentChunkHashes.entries()) {
-          if (exp < nowMs) _recentChunkHashes.delete(k);
-        }
-        if (_recentChunkHashes.has(checksum)) {
-          return;
-        }
-        _recentChunkHashes.set(checksum, nowMs + 3000);
-
         try {
           if (window.speechSynthesis) window.speechSynthesis.cancel();
+          if (typeof _stopWakeSentinel === 'function' && _wakeRec) {
+            _stopWakeSentinel();
+          }
           _requestWakeLock();
           const ctx = _ensureAudioCtx();
           if (ctx.state === 'suspended') await ctx.resume();
@@ -2032,6 +2012,9 @@
               _playbackState = 'idle';
               _playTime = 0;
               window._jarvisAudioEnergy = 0;
+              if (typeof _scheduleWakeSentinelRestart === 'function') {
+                _scheduleWakeSentinelRestart(700);
+              }
             }
           };
         } catch (err) {
@@ -2274,7 +2257,7 @@
       'jarvis'
     ];
 
-    let _wakeSentinelEnabled = localStorage.getItem('jarvis_wake_sentinel') !== '0';
+    let _wakeSentinelEnabled = localStorage.getItem('jarvis_wake_sentinel') === '1';
     let _wakeRec = null;
     let _wakeRestartTimer = null;
     let _lastWakeTriggerMs = 0;
@@ -2337,7 +2320,7 @@
 
     function _scheduleWakeSentinelRestart(delayMs = 500) {
       clearTimeout(_wakeRestartTimer);
-      if (!_wakeSentinelEnabled || _voiceWs) return;
+      if (!_wakeSentinelEnabled || _voiceWs || _playbackState === 'playing' || _activeAudioSources.length > 0) return;
       _wakeRestartTimer = setTimeout(_startWakeSentinel, delayMs);
     }
 
@@ -2372,7 +2355,16 @@
     }
 
     function _startWakeSentinel() {
-      if (!_wakeSentinelEnabled || _voiceWs || _wakeRec) return;
+      if (
+        !_wakeSentinelEnabled ||
+        _voiceWs ||
+        _wakeRec ||
+        _playbackState === 'playing' ||
+        _activeAudioSources.length > 0 ||
+        window.JarvisAndroid
+      ) {
+        return;
+      }
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SR) {
         _syncWakeSentinelUI(false);
@@ -2391,6 +2383,7 @@
         };
 
         rec.onresult = (event) => {
+          if (_playbackState === 'playing' || _activeAudioSources.length > 0) return;
           for (let i = event.resultIndex; i < event.results.length; i++) {
             const transcript = (event.results[i][0].transcript || '').toLowerCase().trim();
             if (!transcript) continue;
@@ -2420,8 +2413,8 @@
 
         rec.onend = () => {
           _wakeRec = null;
-          if (_wakeSentinelEnabled && !_voiceWs) {
-            _scheduleWakeSentinelRestart(300);
+          if (_wakeSentinelEnabled && !_voiceWs && _playbackState !== 'playing') {
+            _scheduleWakeSentinelRestart(400);
           } else {
             _syncWakeSentinelUI(false);
           }
@@ -2467,21 +2460,11 @@
       });
     }
 
-    function _isStandalonePWA() {
-      return (
-        (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
-        window.navigator.standalone === true
-      );
-    }
-
-    // Handle ?voice=1, ?cmd=..., and Standalone PWA Launches ("Open App -> JARVIS")
+    // Handle explicit ?voice=1 & ?cmd=... deep-links
     window.addEventListener('load', () => {
       _syncWakeSentinelUI(false);
       const params = new URLSearchParams(location.search);
-      const wantVoice =
-        params.get('voice') === '1' ||
-        params.get('voice') === 'true' ||
-        (_isStandalonePWA() && _wakeSentinelEnabled);
+      const wantVoice = params.get('voice') === '1' || params.get('voice') === 'true';
       const initCmd = (params.get('cmd') || '').trim();
 
       if (wantVoice || initCmd) {
@@ -2493,40 +2476,6 @@
         setTimeout(_startWakeSentinel, 600);
       }
     });
-
-    // Android Chrome Launch Queue API (fires when "Open App -> JARVIS" re-focuses existing PWA)
-    if ('launchQueue' in window && window.launchQueue && typeof window.launchQueue.setConsumer === 'function') {
-      window.launchQueue.setConsumer((launchParams) => {
-        if (!launchParams) return;
-        let cmd = '';
-        if (launchParams.targetURL) {
-          try {
-            const u = new URL(launchParams.targetURL, location.origin);
-            cmd = (u.searchParams.get('cmd') || '').trim();
-          } catch (_) {}
-        }
-        setTimeout(() => {
-          if (!_voiceWs) _triggerWakeActivation(cmd);
-        }, 200);
-      });
-    }
-
-    // Re-engage live voice when standalone PWA is brought back to foreground via "Open App -> JARVIS"
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && _isStandalonePWA() && _wakeSentinelEnabled) {
-        setTimeout(() => {
-          if (!_voiceWs) _triggerWakeActivation('');
-        }, 250);
-      }
-    });
-
-    // Also start Wake Sentinel on first user interaction if browser blocked cold-start mic
-    document.addEventListener('click', () => {
-      if (_wakeSentinelEnabled && !_voiceWs && !_wakeRec) _startWakeSentinel();
-    }, { passive: true });
-    document.addEventListener('touchstart', () => {
-      if (_wakeSentinelEnabled && !_voiceWs && !_wakeRec) _startWakeSentinel();
-    }, { passive: true });
   </script>
 </body>
 </html>
