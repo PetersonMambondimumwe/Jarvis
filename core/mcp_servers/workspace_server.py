@@ -775,5 +775,66 @@ def email_reply(
         return f"[Email] Failed to send reply: {exc}"
 
 
+# ── WhatsApp Cloud API MCP Tool (jarvis_notification Template) ────────────
+
+@server.tool()
+def whatsapp_send(
+    to: str,
+    message: str,
+    template_name: str = "jarvis_notification",
+) -> str:
+    """Send a WhatsApp message to one or more phone numbers using Meta WhatsApp Cloud API and the 'jarvis_notification' template.
+
+    Parameters:
+      - to: Recipient phone number (e.g. '+27712345678' or '0712345678', or comma-separated numbers)
+      - message: The message text to send
+      - template_name: Approved Meta WhatsApp template name (default: 'jarvis_notification')
+    """
+    from actions.send_message import _parse_recipients
+    from core.whatsapp_client import WhatsAppClient, load_whatsapp_config
+
+    to_clean = (to or "").strip()
+    msg_clean = (message or "").strip()
+    if not to_clean:
+        return "[WhatsApp] Error: Please provide a recipient phone number ('to')."
+    if not msg_clean:
+        return "[WhatsApp] Error: Please provide the 'message' content."
+
+    try:
+        cfg = load_whatsapp_config()
+        client = WhatsAppClient(cfg)
+        recipients = _parse_recipients(to_clean)
+        successes: list[str] = []
+        failures: list[str] = []
+
+        for name, phone in recipients:
+            target_text = msg_clean
+            if name:
+                target_text = target_text.replace("[name]", name).replace("[Name]", name)
+            try:
+                res = client.send_message(
+                    recipient=phone,
+                    message=target_text,
+                    template_name=template_name or cfg.template_name,
+                )
+                clean_num = res.get("recipient", phone)
+                label = f"{name} ({clean_num})" if name else clean_num
+                successes.append(label)
+            except Exception as exc:
+                label = f"{name} ({phone})" if name else phone
+                failures.append(f"{label}: {exc}")
+
+        if successes and not failures:
+            return f"✅ WhatsApp message sent via '{template_name}' to {', '.join(successes)}."
+        if successes and failures:
+            return (
+                f"⚠️ WhatsApp partially sent: {len(successes)} succeeded ({', '.join(successes)}), "
+                f"{len(failures)} failed ({'; '.join(failures)})."
+            )
+        return f"[WhatsApp] Delivery failed: {'; '.join(failures)}"
+    except Exception as exc:
+        return f"[WhatsApp] Configuration or delivery error: {exc}"
+
+
 if __name__ == "__main__":
     asyncio.run(server.run_stdio_async())

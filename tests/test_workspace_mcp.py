@@ -175,6 +175,41 @@ class TestWorkspaceMCP(unittest.TestCase):
             self.assertIn("dean@up.ac.za", res)
             self.assertIn("Congratulations Sir Peterson, your grant has been approved.", res)
 
+    def test_workspace_whatsapp_send_template(self):
+        from core.whatsapp_client import WhatsAppConfig
+
+        fake_cfg = WhatsAppConfig(
+            phone_number_id="1234567890",
+            token="EAAB_fake_token",
+            template_name="jarvis_notification",
+            template_lang="en",
+        )
+        # First call returns 132001 (en not found), second call (en_US) succeeds
+        resp_fail = MagicMock(status_code=404, text='{"error":{"code":132001,"message":"Template language not found"}}')
+        resp_fail.json.return_value = {"error": {"code": 132001, "message": "Template language not found"}}
+
+        resp_ok = MagicMock(status_code=200, text='{"messages":[{"id":"wamid.123"}]}')
+        resp_ok.json.return_value = {"messages": [{"id": "wamid.123"}]}
+
+        with patch("core.whatsapp_client.load_whatsapp_config", return_value=fake_cfg), patch(
+            "requests.Session.post", side_effect=[resp_fail, resp_ok]
+        ) as mock_post:
+            res = workspace_server.whatsapp_send(
+                to="0712345678",
+                message="Good day,\nYour meeting is at 10 AM.\tSee you there!",
+                template_name="jarvis_notification",
+            )
+            self.assertIn("WhatsApp message sent via 'jarvis_notification'", res)
+            self.assertIn("27712345678", res)
+            self.assertEqual(mock_post.call_count, 2)
+            sent_payload = mock_post.call_args_list[1].kwargs["json"]
+            self.assertEqual(sent_payload["template"]["name"], "jarvis_notification")
+            self.assertEqual(sent_payload["template"]["language"]["code"], "en_US")
+            param_text = sent_payload["template"]["components"][0]["parameters"][0]["text"]
+            self.assertNotIn("\n", param_text)
+            self.assertNotIn("\t", param_text)
+            self.assertEqual(param_text, "Your meeting is at 10 AM. See you there!")
+
     def test_mcp_client_discovers_workspace_server(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_file = Path(tmp_dir) / "mcp_servers.json"
@@ -204,6 +239,7 @@ class TestWorkspaceMCP(unittest.TestCase):
                     self.assertIn("mcp__workspace__email_search", names)
                     self.assertIn("mcp__workspace__email_read_message", names)
                     self.assertIn("mcp__workspace__email_reply", names)
+                    self.assertIn("mcp__workspace__whatsapp_send", names)
                 finally:
                     await mgr.shutdown()
 

@@ -280,12 +280,15 @@ class WhatsAppClient:
 
         clean_recipient = normalize_phone_number(recipient)
         t_name = (template_name or self.config.template_name or DEFAULT_TEMPLATE_NAME).strip()
-        lang = (language_code or self.config.template_lang or DEFAULT_TEMPLATE_LANG).strip()
+        primary_lang = (language_code or self.config.template_lang or DEFAULT_TEMPLATE_LANG).strip()
 
         # Clean redundant "Good day" prefix if already present in message to avoid "Good day, Good day"
         var_text = re.sub(r"^good\s*day[,\s]*", "", message, flags=re.IGNORECASE).strip()
         if not var_text:
             var_text = message
+        # Meta Cloud API rejects template parameters containing newlines, tabs, or >4 consecutive spaces (Error 132018)
+        var_text = re.sub(r"[\r\n\t]+", " ", var_text)
+        var_text = re.sub(r" {2,}", " ", var_text).strip()
 
         url = f"https://graph.facebook.com/{self.config.api_version}/{self.config.phone_number_id}/messages"
         headers = {
@@ -293,57 +296,104 @@ class WhatsAppClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-        payload = {
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": clean_recipient,
-            "type": "template",
-            "template": {
-                "name": t_name,
-                "language": {
-                    "code": lang,
-                },
-                "components": [
+
+        lang_candidates = [primary_lang]
+        if primary_lang.lower().startswith("en"):
+            for fallback_lang in ("en", "en_US", "en_GB"):
+                if fallback_lang not in lang_candidates:
+                    lang_candidates.append(fallback_lang)
+
+        body_components = [
+            {
+                "type": "body",
+                "parameters": [
                     {
-                        "type": "body",
-                        "parameters": [
-                            {
-                                "type": "text",
-                                "text": var_text,
-                            }
-                        ],
+                        "type": "text",
+                        "text": var_text,
                     }
                 ],
-            },
-        }
+            }
+        ]
 
-        try:
-            resp = self.session.post(url, json=payload, headers=headers, timeout=self.config.timeout)
-        except requests.RequestException as exc:
-            raise WhatsAppError(f"WhatsApp API is unreachable: {exc}") from exc
+        last_resp = None
+        last_data: dict[str, Any] = {}
+        used_lang = primary_lang
 
-        try:
-            data = resp.json()
-        except ValueError:
-            data = {}
+        for lang in lang_candidates:
+            used_lang = lang
+            payload: dict[str, Any] = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": clean_recipient,
+                "type": "template",
+                "template": {
+                    "name": t_name,
+                    "language": {"code": lang},
+                    "components": body_components,
+                },
+            }
 
-        if resp.status_code >= 400:
-            err = data.get("error", {})
+            try:
+                resp = self.session.post(url, json=payload, headers=headers, timeout=self.config.timeout)
+            except requests.RequestException as exc:
+                raise WhatsAppError(f"WhatsApp API is unreachable: {exc}") from exc
+
+            try:
+                data = resp.json()
+            except ValueError:
+                data = {}
+
+            last_resp = resp
+            last_data = data
+
+            if resp.status_code < 400:
+                break
+
+            err_code = (data.get("error") or {}).get("code")
+            # 132000: template has 0 parameters instead of 1 -> retry once without components
+            if err_code == 132000:
+                payload_no_params = {
+                    "messaging_product": "whatsapp",
+                    "recipient_type": "individual",
+                    "to": clean_recipient,
+                    "type": "template",
+                    "template": {
+                        "name": t_name,
+                        "language": {"code": lang},
+                    },
+                }
+                try:
+                    resp2 = self.session.post(url, json=payload_no_params, headers=headers, timeout=self.config.timeout)
+                    data2 = resp2.json() if resp2.text else {}
+                    if resp2.status_code < 400:
+                        last_resp = resp2
+                        last_data = data2
+                        break
+                except Exception:
+                    pass
+
+            # 132001: template translation language mismatch -> try next English locale (en / en_US / en_GB)
+            if err_code == 132001:
+                continue
+            break
+
+        if last_resp is not None and last_resp.status_code >= 400:
+            err = last_data.get("error", {})
             err_code = err.get("code")
             err_msg = (
                 err.get("error_user_msg")
                 or err.get("message")
-                or data.get("message")
-                or f"HTTP {resp.status_code}"
+                or last_data.get("message")
+                or f"HTTP {last_resp.status_code}"
             )
             if err_code in (132000, 132001) or "template" in str(err_msg).lower():
                 err_msg = (
-                    f"{err_msg}. Note: Ensure template '{t_name}' (language '{lang}') "
+                    f"{err_msg}. Note: Ensure template '{t_name}' (language '{used_lang}') "
                     f"is created and approved in Meta WhatsApp Manager (https://business.facebook.com/wa/manage/message-templates/)"
                 )
-            raise WhatsAppError(f"WhatsApp Cloud API error ({resp.status_code}): {err_msg}")
+            raise WhatsAppError(f"WhatsApp Cloud API error ({last_resp.status_code}): {err_msg}")
 
-        messages = data.get("messages", [])
+        messages = last_data.get("messages", [])
         msg_id = messages[0].get("id") if messages and isinstance(messages[0], dict) else ""
 
         return {
@@ -352,7 +402,7 @@ class WhatsAppClient:
             "recipient": clean_recipient,
             "mode": "template",
             "template_name": t_name,
-            "raw": data,
+            "raw": last_data,
         }
 
     def send_message(
