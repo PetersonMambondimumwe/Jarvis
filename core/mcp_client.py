@@ -203,30 +203,69 @@ class MCPClientManager:
         return self._function_declarations
 
     async def _connect_server(self, name: str, config: dict) -> None:
-        """Connect to a single stdio MCP server."""
-        command = config.get("command")
-        if not command:
-            print(f"[MCP] [!] Server '{name}' missing 'command'. Skipping.")
-            return
-
-        args = config.get("args", [])
-        env = dict(os.environ)
-        if "env" in config and isinstance(config["env"], dict):
-            env.update({k: str(v) for k, v in config["env"].items()})
-
-        # Windows-specific: resolve npx/uvx via shell if needed
-        server_params = StdioServerParameters(
-            command=command,
-            args=args,
-            env=env,
-        )
-
+        """Connect to a single stdio or remote SSE/HTTP MCP server."""
         ctx = MCPServerContext(name=name, config=config)
+        url = (config.get("url") or "").strip()
 
-        # Enter stdio client context
-        read_stream, write_stream = await self._exit_stack.enter_async_context(
-            stdio_client(server_params)
-        )
+        if url:
+            headers = config.get("headers") if isinstance(config.get("headers"), dict) else None
+            transport = (config.get("transport") or "sse").strip().lower()
+            if transport in ("http", "streamable_http", "streamable-http"):
+                from mcp.client.streamable_http import streamablehttp_client  # type: ignore
+                streams = await self._exit_stack.enter_async_context(
+                    streamablehttp_client(url, headers=headers)
+                )
+                read_stream, write_stream = streams[0], streams[1]
+            else:
+                from mcp.client.sse import sse_client  # type: ignore
+                read_stream, write_stream = await self._exit_stack.enter_async_context(
+                    sse_client(url, headers=headers)
+                )
+        else:
+            command = (config.get("command") or "").strip()
+            if not command:
+                print(f"[MCP] [!] Server '{name}' missing 'command' or 'url'. Skipping.")
+                return
+
+            is_python = command.lower() in ("python", "python3", "python.exe")
+            if is_python:
+                command = sys.executable
+            elif os.name != "nt" and command.lower().endswith(".cmd"):
+                # On Linux / Dokploy containers, strip Windows .cmd suffix (e.g. npx.cmd -> npx)
+                command = command[:-4]
+            elif os.name == "nt" and command.lower() in ("npx", "npm"):
+                command = f"{command}.cmd"
+
+            raw_args = config.get("args", [])
+            resolved_args: List[str] = []
+            base = _base_dir()
+            for raw_arg in raw_args:
+                arg_str = os.path.expandvars(os.path.expanduser(str(raw_arg)))
+                if is_python and arg_str.endswith(".py") and not os.path.isabs(arg_str):
+                    candidate = (base / arg_str).resolve()
+                    if candidate.exists():
+                        arg_str = str(candidate)
+                elif name == "filesystem" and os.path.isabs(arg_str) and not arg_str.startswith("-"):
+                    try:
+                        os.makedirs(arg_str, exist_ok=True)
+                    except Exception:
+                        pass
+                resolved_args.append(arg_str)
+
+            env = dict(os.environ)
+            if "env" in config and isinstance(config["env"], dict):
+                env.update({k: str(v) for k, v in config["env"].items()})
+
+            server_params = StdioServerParameters(
+                command=command,
+                args=resolved_args,
+                env=env,
+            )
+
+            read_stream, write_stream = await self._exit_stack.enter_async_context(
+                stdio_client(server_params)
+            )
+
         session = await self._exit_stack.enter_async_context(
             ClientSession(read_stream, write_stream)
         )

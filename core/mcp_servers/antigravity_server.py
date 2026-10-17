@@ -18,7 +18,10 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from actions.antigravity_bridge import delegate_task, check_task_status, list_tasks
-from mcp.server.mcpserver import MCPServer
+try:
+    from mcp.server.fastmcp import FastMCP as MCPServer
+except ImportError:
+    from mcp.server.mcpserver import MCPServer  # type: ignore
 
 server = MCPServer("AntigravityBridgeServer")
 

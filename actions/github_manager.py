@@ -51,32 +51,242 @@ def _base_dir() -> Path:
 CONFIG_PATH = _base_dir() / "config" / "api_keys.json"
 
 
+def _read_env_vars() -> dict[str, str]:
+    env_vars: dict[str, str] = {}
+    for candidate in [
+        _base_dir() / ".env",
+        Path.cwd() / ".env",
+        Path("/root/jarvis/.env"),
+        Path("/app/.env"),
+    ]:
+        if candidate.is_file():
+            try:
+                for line in candidate.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k, v = k.strip(), v.strip().strip("'\"")
+                    if k and k not in env_vars:
+                        env_vars[k] = v
+            except Exception:
+                pass
+    return env_vars
+
+
 def _load_token() -> str:
     env_token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_PAT")
     if env_token and env_token.strip():
         return env_token.strip()
+    dotenv_vars = _read_env_vars()
+    for key in ("GITHUB_TOKEN", "GITHUB_PAT", "github_pat"):
+        if dotenv_vars.get(key, "").strip():
+            return dotenv_vars[key].strip()
     try:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        token = data.get("github_pat", "").strip()
+        token = (
+            data.get("github_pat")
+            or data.get("GITHUB_TOKEN")
+            or data.get("GITHUB_PAT")
+            or ""
+        ).strip()
         if not token:
-            raise ValueError("github_pat key is empty in api_keys.json")
+            raise ValueError("github_pat / GITHUB_TOKEN is empty in api_keys.json and .env")
         return token
     except (FileNotFoundError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Cannot read config/api_keys.json: {exc}") from exc
+        raise RuntimeError(f"Cannot read GitHub token from .env or config/api_keys.json: {exc}") from exc
 
 
-# ── PyGithub lazy import ───────────────────────────────────────────────────
+# ── PyGithub lazy import + Native REST API v3 Fallback ─────────────────────
+
+class _RestGithubException(Exception):
+    def __init__(self, status: int, data: Any):
+        self.status = status
+        self.data = data
+        super().__init__(f"GitHub API HTTP {status}: {data}")
+
+
+class _SimpleObj:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+class _RestRepo:
+    def __init__(self, client: "_RestGithubClient", data: dict):
+        self._c = client
+        self._update_from(data)
+
+    def _update_from(self, data: dict) -> None:
+        self.name = data.get("name", "")
+        self.full_name = data.get("full_name", "")
+        self.description = data.get("description")
+        self.language = data.get("language")
+        self.stargazers_count = data.get("stargazers_count", 0)
+        self.forks_count = data.get("forks_count", 0)
+        self.open_issues_count = data.get("open_issues_count", 0)
+        self.default_branch = data.get("default_branch", "main")
+        self.private = bool(data.get("private", False))
+        self.html_url = data.get("html_url", f"https://github.com/{self.full_name}")
+        self.pushed_at = data.get("pushed_at", "")
+        owner_data = data.get("owner") or {}
+        self.owner = _SimpleObj(login=owner_data.get("login", self.full_name.split("/")[0] if "/" in self.full_name else ""))
+        self._topics = data.get("topics") or []
+
+    def get_topics(self) -> list[str]:
+        return list(self._topics)
+
+    def replace_topics(self, names: list[str]) -> None:
+        res = self._c._req("PUT", f"/repos/{self.full_name}/topics", json={"names": names})
+        self._topics = res.get("names", names)
+
+    def edit(self, **kwargs) -> None:
+        res = self._c._req("PATCH", f"/repos/{self.full_name}", json=kwargs)
+        if isinstance(res, dict):
+            self._update_from(res)
+
+    def delete(self) -> None:
+        self._c._req("DELETE", f"/repos/{self.full_name}")
+
+    def get_contents(self, path: str, ref: Optional[str] = None):
+        import base64
+        params = {"ref": ref} if ref else None
+        res = self._c._req("GET", f"/repos/{self.full_name}/contents/{path.lstrip('/')}", params=params)
+        if isinstance(res, list):
+            return [_SimpleObj(type=item.get("type", "file"), path=item.get("path", "")) for item in res]
+        raw_b64 = res.get("content", "")
+        decoded = base64.b64decode(raw_b64) if raw_b64 else b""
+        return _SimpleObj(
+            type=res.get("type", "file"),
+            path=res.get("path", path),
+            sha=res.get("sha", ""),
+            decoded_content=decoded,
+        )
+
+    def create_file(self, path: str, message: str, content: str, branch: Optional[str] = None) -> dict:
+        import base64
+        b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        payload: dict[str, Any] = {"message": message, "content": b64}
+        if branch:
+            payload["branch"] = branch
+        res = self._c._req("PUT", f"/repos/{self.full_name}/contents/{path.lstrip('/')}", json=payload)
+        commit_sha = (res.get("commit") or {}).get("sha", "0000000")
+        return {"commit": _SimpleObj(sha=commit_sha)}
+
+    def update_file(self, path: str, message: str, content: str, sha: str, branch: Optional[str] = None) -> dict:
+        import base64
+        b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        payload: dict[str, Any] = {"message": message, "content": b64, "sha": sha}
+        if branch:
+            payload["branch"] = branch
+        res = self._c._req("PUT", f"/repos/{self.full_name}/contents/{path.lstrip('/')}", json=payload)
+        commit_sha = (res.get("commit") or {}).get("sha", "0000000")
+        return {"commit": _SimpleObj(sha=commit_sha)}
+
+    def get_branches(self) -> list:
+        res = self._c._req("GET", f"/repos/{self.full_name}/branches", params={"per_page": 100})
+        return [_SimpleObj(name=b.get("name", ""), commit=_SimpleObj(sha=(b.get("commit") or {}).get("sha", ""))) for b in res]
+
+    def get_branch(self, branch: str):
+        b = self._c._req("GET", f"/repos/{self.full_name}/branches/{branch}")
+        return _SimpleObj(name=b.get("name", branch), commit=_SimpleObj(sha=(b.get("commit") or {}).get("sha", "")))
+
+    def create_git_ref(self, ref: str, sha: str):
+        return self._c._req("POST", f"/repos/{self.full_name}/git/refs", json={"ref": ref, "sha": sha})
+
+    def create_issue(self, title: str, body: str = "", labels: Optional[list] = None):
+        payload: dict[str, Any] = {"title": title, "body": body}
+        if labels:
+            payload["labels"] = labels
+        res = self._c._req("POST", f"/repos/{self.full_name}/issues", json=payload)
+        return _SimpleObj(title=res.get("title", title), number=res.get("number", 0), html_url=res.get("html_url", ""))
+
+    def create_pull(self, title: str, body: str, head: str, base: str):
+        payload = {"title": title, "body": body, "head": head, "base": base}
+        res = self._c._req("POST", f"/repos/{self.full_name}/pulls", json=payload)
+        return _SimpleObj(title=res.get("title", title), number=res.get("number", 0), html_url=res.get("html_url", ""))
+
+
+class _RestUser:
+    def __init__(self, client: "_RestGithubClient", data: dict):
+        self._c = client
+        self.login = data.get("login", "")
+        self.name = data.get("name")
+        self.bio = data.get("bio")
+        self.company = data.get("company")
+        self.location = data.get("location")
+        self.public_repos = data.get("public_repos", 0)
+        self.total_private_repos = data.get("total_private_repos", 0)
+        self.followers = data.get("followers", 0)
+        self.following = data.get("following", 0)
+        self.html_url = data.get("html_url", "")
+
+    def get_repos(self) -> list[_RestRepo]:
+        res = self._c._req("GET", "/user/repos", params={"per_page": 100, "sort": "updated"})
+        return [_RestRepo(self._c, r) for r in res]
+
+    def get_starred(self) -> list[_RestRepo]:
+        res = self._c._req("GET", "/user/starred", params={"per_page": 100})
+        return [_RestRepo(self._c, r) for r in res]
+
+    def get_orgs(self) -> list:
+        return []
+
+    def create_repo(self, name: str, description: str = "", private: bool = False, auto_init: bool = True) -> _RestRepo:
+        res = self._c._req(
+            "POST",
+            "/user/repos",
+            json={"name": name, "description": description, "private": private, "auto_init": auto_init},
+        )
+        return _RestRepo(self._c, res)
+
+
+class _RestGithubClient:
+    def __init__(self, token: str):
+        self._token = token
+        self._user_cache: Optional[_RestUser] = None
+
+    def _req(self, method: str, path: str, params: Optional[dict] = None, json: Optional[dict] = None) -> Any:
+        import requests
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        resp = requests.request(
+            method,
+            f"https://api.github.com{path}",
+            headers=headers,
+            params=params,
+            json=json,
+            timeout=20,
+        )
+        if resp.status_code >= 400:
+            try:
+                err_data = resp.json()
+            except Exception:
+                err_data = resp.text
+            raise _RestGithubException(resp.status_code, err_data)
+        if resp.status_code == 204 or not resp.text:
+            return {}
+        return resp.json()
+
+    def get_user(self) -> _RestUser:
+        if self._user_cache is None:
+            self._user_cache = _RestUser(self, self._req("GET", "/user"))
+        return self._user_cache
+
+    def get_repo(self, full_name: str) -> _RestRepo:
+        return _RestRepo(self, self._req("GET", f"/repos/{full_name}"))
+
 
 def _get_gh():
-    """Return an authenticated Github client, or raise a friendly error."""
+    """Return an authenticated Github client (PyGithub if available, else native REST v3 client)."""
+    token = _load_token()
     try:
         from github import Github, Auth  # type: ignore  # noqa: F401
+        return Github(auth=Auth.Token(token))
     except ImportError:
-        raise RuntimeError(
-            "PyGithub is not installed. Run: pip install PyGithub"
-        )
-    token = _load_token()
-    return Github(auth=Auth.Token(token))
+        return _RestGithubClient(token)
 
 
 # ── Individual action handlers ─────────────────────────────────────────────
@@ -318,7 +528,7 @@ def _all_repos(gh) -> list:
 
 def _resolve_repo(gh, args: dict):
     """
-    Resolve a repo argument to a PyGithub Repository object.
+    Resolve a repo argument to a Repository object.
 
     Accepts:
       - 'owner/repo'  — tried verbatim first
@@ -326,8 +536,6 @@ def _resolve_repo(gh, args: dict):
 
     On 404 or no match, raises ValueError with a helpful list of close matches.
     """
-    from github import GithubException  # type: ignore
-
     repo_arg = args.get("repo", "").strip()
     if not repo_arg:
         raise ValueError(
@@ -339,8 +547,8 @@ def _resolve_repo(gh, args: dict):
     if "/" in repo_arg:
         try:
             return gh.get_repo(repo_arg)
-        except GithubException as exc:
-            if exc.status == 404:
+        except Exception as exc:
+            if getattr(exc, "status", None) == 404:
                 raise ValueError(
                     f"Repository '{repo_arg}' not found or not accessible. "
                     "Check the owner and repo name, or your token permissions."
@@ -380,24 +588,162 @@ def _resolve_repo(gh, args: dict):
     )
 
 
+# ── Repository mutation & file handlers ───────────────────────────────────
+
+def _rename_repo(gh, args: dict) -> str:
+    """Rename an existing GitHub repository."""
+    repo = _resolve_repo(gh, args)
+    old_full_name = repo.full_name
+    new_name = (
+        args.get("new_name")
+        or args.get("target_name")
+        or args.get("name")
+        or ""
+    ).strip()
+    if not new_name:
+        return "Please provide 'new_name' for the repository rename."
+    if "/" in new_name:
+        new_name = new_name.split("/")[-1].strip()
+    repo.edit(name=new_name)
+    owner_login = old_full_name.split("/")[0]
+    new_url = f"https://github.com/{owner_login}/{new_name}"
+    return (
+        f"✅ Repository renamed successfully: **{old_full_name}** → **{owner_login}/{new_name}**\n"
+        f"URL: {new_url}"
+    )
+
+
+def _create_repo(gh, args: dict) -> str:
+    """Create a new GitHub repository under the authenticated user."""
+    name = (args.get("name") or args.get("repo") or "").strip()
+    if not name:
+        return "Please provide a 'name' for the new repository."
+    if "/" in name:
+        name = name.split("/")[-1].strip()
+    description = str(args.get("description") or "").strip()
+    private = bool(args.get("private", False))
+    auto_init = bool(args.get("auto_init", True))
+    user = gh.get_user()
+    new_repo = user.create_repo(
+        name=name,
+        description=description,
+        private=private,
+        auto_init=auto_init,
+    )
+    vis = "Private" if new_repo.private else "Public"
+    return (
+        f"✅ Repository created: **{new_repo.full_name}** ({vis})\n"
+        f"URL: {new_repo.html_url}"
+    )
+
+
+def _update_repo(gh, args: dict) -> str:
+    """Update repository metadata (description, visibility, homepage, default_branch, topics)."""
+    repo = _resolve_repo(gh, args)
+    edit_kwargs: dict[str, Any] = {}
+    if "description" in args and args["description"] is not None:
+        edit_kwargs["description"] = str(args["description"])
+    if "private" in args and args["private"] is not None:
+        if isinstance(args["private"], str):
+            edit_kwargs["private"] = args["private"].strip().lower() in ("true", "1", "yes", "private")
+        else:
+            edit_kwargs["private"] = bool(args["private"])
+    if "homepage" in args and args["homepage"] is not None:
+        edit_kwargs["homepage"] = str(args["homepage"]).strip()
+    if "default_branch" in args and args["default_branch"]:
+        edit_kwargs["default_branch"] = str(args["default_branch"]).strip()
+
+    if edit_kwargs:
+        repo.edit(**edit_kwargs)
+
+    topics_raw = args.get("topics")
+    if topics_raw is not None:
+        if isinstance(topics_raw, str):
+            topics_list = [t.strip().lower() for t in topics_raw.split(",") if t.strip()]
+        elif isinstance(topics_raw, list):
+            topics_list = [str(t).strip().lower() for t in topics_raw if str(t).strip()]
+        else:
+            topics_list = []
+        repo.replace_topics(topics_list)
+
+    return f"✅ Repository **{repo.full_name}** updated successfully.\nURL: {repo.html_url}"
+
+
+def _delete_repo(gh, args: dict) -> str:
+    """Delete a GitHub repository (requires confirm=True)."""
+    confirmed = args.get("confirm", False)
+    if isinstance(confirmed, str):
+        confirmed = confirmed.strip().lower() in ("true", "1", "yes")
+    if not confirmed:
+        return "⚠️ Repository deletion requires explicit confirmation (`confirm=True`)."
+    repo = _resolve_repo(gh, args)
+    full_name = repo.full_name
+    repo.delete()
+    return f"✅ Repository **{full_name}** has been permanently deleted."
+
+
+def _create_or_update_file(gh, args: dict) -> str:
+    """Create a new file or update an existing file in a GitHub repository."""
+    repo = _resolve_repo(gh, args)
+    path = (args.get("path") or "").strip().lstrip("/")
+    if not path:
+        return "Please provide the file 'path' inside the repository."
+    content = args.get("content")
+    if content is None:
+        return "Please provide 'content' for the file."
+    branch = (args.get("branch") or repo.default_branch).strip()
+    commit_msg = (args.get("commit_message") or args.get("message") or f"Update {path}").strip()
+
+    try:
+        existing = repo.get_contents(path, ref=branch)
+        if isinstance(existing, list):
+            return f"Error: '{path}' is a directory, not a file."
+        res = repo.update_file(
+            path=path,
+            message=commit_msg,
+            content=str(content),
+            sha=existing.sha,
+            branch=branch,
+        )
+        commit_sha = res["commit"].sha[:7]
+        return f"✅ Updated **{path}** on `{branch}` in **{repo.full_name}** (commit `{commit_sha}`)."
+    except Exception as exc:
+        if getattr(exc, "status", None) == 404:
+            res = repo.create_file(
+                path=path,
+                message=commit_msg,
+                content=str(content),
+                branch=branch,
+            )
+            commit_sha = res["commit"].sha[:7]
+            return f"✅ Created **{path}** on `{branch}` in **{repo.full_name}** (commit `{commit_sha}`)."
+        raise
+
+
 # ── Dispatch table ─────────────────────────────────────────────────────────
 
 _ACTIONS: dict[str, Any] = {
-    "list_repos":       _list_repos,
-    "repo_info":        _repo_info,
-    "list_issues":      _list_issues,
-    "create_issue":     _create_issue,
-    "close_issue":      _close_issue,
-    "list_prs":         _list_prs,
-    "create_pr":        _create_pr,
-    "merge_pr":         _merge_pr,
-    "list_branches":    _list_branches,
-    "create_branch":    _create_branch,
-    "read_file":        _read_file,
-    "list_commits":     _list_commits,
-    "search_repos":     _search_repos,
-    "user_info":        _user_info,
-    "activity_summary": _activity_summary,
+    "list_repos":            _list_repos,
+    "repo_info":             _repo_info,
+    "rename_repo":           _rename_repo,
+    "create_repo":           _create_repo,
+    "update_repo":           _update_repo,
+    "delete_repo":           _delete_repo,
+    "create_or_update_file": _create_or_update_file,
+    "write_file":            _create_or_update_file,
+    "list_issues":           _list_issues,
+    "create_issue":          _create_issue,
+    "close_issue":           _close_issue,
+    "list_prs":              _list_prs,
+    "create_pr":             _create_pr,
+    "merge_pr":              _merge_pr,
+    "list_branches":         _list_branches,
+    "create_branch":         _create_branch,
+    "read_file":             _read_file,
+    "list_commits":          _list_commits,
+    "search_repos":          _search_repos,
+    "user_info":             _user_info,
+    "activity_summary":      _activity_summary,
 }
 
 

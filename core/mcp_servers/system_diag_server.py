@@ -22,7 +22,10 @@ import time
 from typing import List, Optional
 
 import psutil
-from mcp.server.mcpserver import MCPServer
+try:
+    from mcp.server.fastmcp import FastMCP as MCPServer
+except ImportError:
+    from mcp.server.mcpserver import MCPServer  # type: ignore
 
 server = MCPServer("SystemDiagnosticsServer")
 

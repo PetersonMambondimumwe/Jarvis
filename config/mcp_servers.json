@@ -1,5 +1,10 @@
 {
   "mcpServers": {
+    "workspace": {
+      "command": "python",
+      "args": ["core/mcp_servers/workspace_server.py"],
+      "enabled": true
+    },
     "antigravity": {
       "command": "python",
       "args": ["core/mcp_servers/antigravity_server.py"],
@@ -20,9 +25,9 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "C:\\Users\\u19094290\\Downloads",
-        "C:\\Users\\u19094290\\Documents",
-        "C:\\Users\\u19094290\\Desktop"
+        "~/Downloads",
+        "~/Documents",
+        "~/Desktop"
       ],
       "enabled": true
     },

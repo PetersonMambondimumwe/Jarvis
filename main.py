@@ -609,11 +609,9 @@ TOOL_DECLARATIONS = [
     {
         "name": "github_manager",
         "description": (
-            "Connects Jarvis to the user's GitHub account for repository inspection and queries. "
-            "Note: Agent Hermes is the dedicated execution agent who holds full execution authority "
-            "over GitHub repositories. All active tasks, code modifications, issues, pull requests, "
-            "and branch operations should be delegated to hermes_agent. Use this tool only for quick "
-            "read-only status queries."
+            "Connects Jarvis directly to the user's GitHub account for repository management and inspection. "
+            "Supports listing repos, renaming repositories (rename_repo), creating/updating/deleting repos, "
+            "reading and writing files (create_or_update_file), and managing issues, branches, and pull requests."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -622,42 +620,58 @@ TOOL_DECLARATIONS = [
                     "type": "STRING",
                     "description": (
                         "The GitHub action to perform. One of:\n"
-                        "list_repos       — list repositories (scope: owner|all|starred)\n"
-                        "repo_info        — detailed info about a repo\n"
-                        "list_issues      — list issues (state: open|closed|all)\n"
-                        "create_issue     — create a new issue (title, body, labels)\n"
-                        "close_issue      — close an issue by number\n"
-                        "list_prs         — list pull requests\n"
-                        "create_pr        — open a pull request (head, base, title, body)\n"
-                        "merge_pr         — merge a PR by number\n"
-                        "list_branches    — list all branches\n"
-                        "create_branch    — create a branch (branch, from_branch)\n"
-                        "read_file        — read a file or directory from the repo (path, ref)\n"
-                        "list_commits     — recent commits (branch, limit)\n"
-                        "search_repos     — search GitHub by keyword (query)\n"
-                        "user_info        — authenticated user profile\n"
-                        "activity_summary — summary of recent GitHub activity"
+                        "list_repos            — list repositories (scope: owner|all|starred)\n"
+                        "repo_info             — detailed info about a repo\n"
+                        "rename_repo           — rename an existing repository (repo, new_name)\n"
+                        "create_repo           — create a new repository (name, description, private)\n"
+                        "update_repo           — update repo description, visibility, homepage, or topics\n"
+                        "delete_repo           — delete a repository (repo, confirm=True)\n"
+                        "create_or_update_file — create or update a file in a repo (repo, path, content, commit_message)\n"
+                        "list_issues           — list issues (state: open|closed|all)\n"
+                        "create_issue          — create a new issue (title, body, labels)\n"
+                        "close_issue           — close an issue by number\n"
+                        "list_prs              — list pull requests\n"
+                        "create_pr             — open a pull request (head, base, title, body)\n"
+                        "merge_pr              — merge a PR by number\n"
+                        "list_branches         — list all branches\n"
+                        "create_branch         — create a branch (branch, from_branch)\n"
+                        "read_file             — read a file or directory from the repo (path, ref)\n"
+                        "list_commits          — recent commits (branch, limit)\n"
+                        "search_repos          — search GitHub by keyword (query)\n"
+                        "user_info             — authenticated user profile\n"
+                        "activity_summary      — summary of recent GitHub activity"
                     )
                 },
                 "repo": {
                     "type": "STRING",
                     "description": "Repository name or 'owner/repo'. E.g. 'Mark-XLVIII' or 'torvalds/linux'."
                 },
-                "title":       {"type": "STRING",  "description": "Issue or PR title"},
-                "body":        {"type": "STRING",  "description": "Issue or PR body text"},
-                "number":      {"type": "INTEGER", "description": "Issue or PR number"},
-                "state":       {"type": "STRING",  "description": "Filter state: open | closed | all"},
-                "branch":      {"type": "STRING",  "description": "Branch name to create or target"},
-                "from_branch": {"type": "STRING",  "description": "Source branch when creating a new branch"},
-                "head":        {"type": "STRING",  "description": "Source branch for a pull request"},
-                "base":        {"type": "STRING",  "description": "Target branch for a pull request"},
-                "path":        {"type": "STRING",  "description": "File or directory path inside the repo"},
-                "ref":         {"type": "STRING",  "description": "Branch/tag/SHA to read from (default: default branch)"},
-                "query":       {"type": "STRING",  "description": "Search query for search_repos"},
-                "scope":       {"type": "STRING",  "description": "For list_repos: owner | all | starred"},
-                "limit":       {"type": "INTEGER", "description": "Max number of results to return"},
-                "labels":      {"type": "STRING",  "description": "Comma-separated labels for create_issue"},
-                "method":      {"type": "STRING",  "description": "Merge method for merge_pr: merge | squash | rebase"}
+                "new_name":        {"type": "STRING",  "description": "New repository name for rename_repo"},
+                "name":            {"type": "STRING",  "description": "Repository name for create_repo"},
+                "description":     {"type": "STRING",  "description": "Repository description for create_repo or update_repo"},
+                "private":         {"type": "BOOLEAN", "description": "True for private repo, False for public"},
+                "auto_init":       {"type": "BOOLEAN", "description": "Initialize new repo with README (default: true)"},
+                "homepage":        {"type": "STRING",  "description": "Homepage URL for update_repo"},
+                "default_branch":  {"type": "STRING",  "description": "Default branch name for update_repo"},
+                "topics":          {"type": "STRING",  "description": "Comma-separated repo topics for update_repo"},
+                "confirm":         {"type": "BOOLEAN", "description": "Must be true to confirm delete_repo"},
+                "content":         {"type": "STRING",  "description": "File text content for create_or_update_file"},
+                "commit_message":  {"type": "STRING",  "description": "Commit message for create_or_update_file"},
+                "title":           {"type": "STRING",  "description": "Issue or PR title"},
+                "body":            {"type": "STRING",  "description": "Issue or PR body text"},
+                "number":          {"type": "INTEGER", "description": "Issue or PR number"},
+                "state":           {"type": "STRING",  "description": "Filter state: open | closed | all"},
+                "branch":          {"type": "STRING",  "description": "Branch name to create or target"},
+                "from_branch":     {"type": "STRING",  "description": "Source branch when creating a new branch"},
+                "head":            {"type": "STRING",  "description": "Source branch for a pull request"},
+                "base":            {"type": "STRING",  "description": "Target branch for a pull request"},
+                "path":            {"type": "STRING",  "description": "File or directory path inside the repo"},
+                "ref":             {"type": "STRING",  "description": "Branch/tag/SHA to read from (default: default branch)"},
+                "query":           {"type": "STRING",  "description": "Search query for search_repos"},
+                "scope":           {"type": "STRING",  "description": "For list_repos: owner | all | starred"},
+                "limit":           {"type": "INTEGER", "description": "Max number of results to return"},
+                "labels":          {"type": "STRING",  "description": "Comma-separated labels for create_issue"},
+                "method":          {"type": "STRING",  "description": "Merge method for merge_pr: merge | squash | rebase"}
             },
             "required": ["action"]
         }
@@ -1441,6 +1455,13 @@ class JarvisLive:
                     _query = args.get("query") or ", ".join(args.get("items", []))
                     _label = f"{_mode.upper()} — {_query[:38]}" if _query else _mode.upper()
                     self.ui.show_content(_label, result)
+
+            # ── MCP tools: execute directly on async loop without thread bounce ─
+            elif hasattr(self, "_mcp") and self._mcp.is_mcp_tool(name):
+                result = await asyncio.wait_for(
+                    self._mcp.execute_tool(name, args),
+                    timeout=60.0,
+                )
 
             # ── all other tools: registry with per-tool timeout ──────────────
             else:
