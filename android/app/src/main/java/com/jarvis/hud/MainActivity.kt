@@ -387,7 +387,6 @@ class MainActivity : Activity() {
             requestPermissions(missing.toTypedArray(), REQ_PERMISSIONS)
         } else {
             startWakeSentinelService()
-            requestBatteryOptimizationExemption()
         }
     }
 
@@ -399,21 +398,6 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_PERMISSIONS) {
             startWakeSentinelService()
-            requestBatteryOptimizationExemption()
-        }
-    }
-
-    @SuppressLint("BatteryLife")
-    private fun requestBatteryOptimizationExemption() {
-        try {
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = Uri.parse("package:$packageName")
-                }
-                startActivity(intent)
-            }
-        } catch (_: Exception) {
         }
     }
 

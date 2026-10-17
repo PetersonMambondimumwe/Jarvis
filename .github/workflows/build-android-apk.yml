@@ -27,18 +27,34 @@ jobs:
       - name: Accept Android SDK Licenses
         run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
+      - name: Generate Release Keystore
+        working-directory: android/app
+        run: |
+          rm -f jarvis-release.jks
+          keytool -genkeypair -v \
+            -keystore jarvis-release.jks \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -alias jarvis \
+            -storepass jarvispassword123 \
+            -keypass jarvispassword123 \
+            -dname "CN=Peterson Mambondimumwe, OU=Mark XLVIII, O=Jarvis HUD, L=Pretoria, S=Gauteng, C=ZA"
+
       - name: Setup Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Build Release APK
+      - name: Build Signed Release APK
         working-directory: android
         run: gradle assembleRelease --no-daemon --stacktrace
 
-      - name: Copy APK to Jarvis-Mark-XLVIII.apk
+      - name: Verify APK Signature (v1 + v2 + v3)
         run: |
           cp android/app/build/outputs/apk/release/app-release.apk Jarvis-Mark-XLVIII.apk
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
+          "$APKSIGNER" verify --verbose --print-certs Jarvis-Mark-XLVIII.apk
           ls -lh Jarvis-Mark-XLVIII.apk
 
       - name: Upload APK Artifact
@@ -51,12 +67,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v48.1.0"
+          TAG="v48.2.0"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" Jarvis-Mark-XLVIII.apk --clobber
           else
             gh release create "$TAG" Jarvis-Mark-XLVIII.apk \
-              --title "JARVIS Mark XLVIII — Native Android Wake Sentinel APK" \
-              --notes "Dedicated Native Android App (\`Jarvis-Mark-XLVIII.apk\`) with 24/7 Foreground Wake-Word Sentinel (\`\"Jarvis wake up\"\`) and 1-Tap Dokploy Server Pairing." \
+              --title "JARVIS Mark XLVIII (v48.2) — Signed Native Android APK" \
+              --notes "Production-signed Native Android App (\`Jarvis-Mark-XLVIII.apk\`) with V1+V2+V3 signatures, 24/7 Foreground Wake-Word Sentinel (\`\"Jarvis wake up\"\`), and 1-Tap Dokploy Server Pairing." \
               --latest
           fi
