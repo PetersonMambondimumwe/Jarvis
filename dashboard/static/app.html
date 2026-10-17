@@ -2454,11 +2454,21 @@
       });
     }
 
-    // Handle ?voice=1 & ?cmd=... deep-links (from Siri Shortcut, Android Routine, or PC wake_word.py)
+    function _isStandalonePWA() {
+      return (
+        (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+        window.navigator.standalone === true
+      );
+    }
+
+    // Handle ?voice=1, ?cmd=..., and Standalone PWA Launches ("Open App -> JARVIS")
     window.addEventListener('load', () => {
       _syncWakeSentinelUI(false);
       const params = new URLSearchParams(location.search);
-      const wantVoice = params.get('voice') === '1' || params.get('voice') === 'true';
+      const wantVoice =
+        params.get('voice') === '1' ||
+        params.get('voice') === 'true' ||
+        (_isStandalonePWA() && _wakeSentinelEnabled);
       const initCmd = (params.get('cmd') || '').trim();
 
       if (wantVoice || initCmd) {
@@ -2468,6 +2478,32 @@
         }, 350);
       } else if (_wakeSentinelEnabled) {
         setTimeout(_startWakeSentinel, 600);
+      }
+    });
+
+    // Android Chrome Launch Queue API (fires when "Open App -> JARVIS" re-focuses existing PWA)
+    if ('launchQueue' in window && window.launchQueue && typeof window.launchQueue.setConsumer === 'function') {
+      window.launchQueue.setConsumer((launchParams) => {
+        if (!launchParams) return;
+        let cmd = '';
+        if (launchParams.targetURL) {
+          try {
+            const u = new URL(launchParams.targetURL, location.origin);
+            cmd = (u.searchParams.get('cmd') || '').trim();
+          } catch (_) {}
+        }
+        setTimeout(() => {
+          if (!_voiceWs) _triggerWakeActivation(cmd);
+        }, 200);
+      });
+    }
+
+    // Re-engage live voice when standalone PWA is brought back to foreground via "Open App -> JARVIS"
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && _isStandalonePWA() && _wakeSentinelEnabled) {
+        setTimeout(() => {
+          if (!_voiceWs) _triggerWakeActivation('');
+        }, 250);
       }
     });
 
