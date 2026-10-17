@@ -674,33 +674,33 @@
       <div id="tab-content-android" class="tab-content">
         <div class="install-step">
           <div class="step-num">1</div>
-          <div class="step-txt">Open the browser menu in the top-right corner of Chrome (<span class="badge-icon">MENU</span>).</div>
+          <div class="step-txt"><strong>Option A — Dedicated Native Android APK (24/7 Background Wake Word):</strong> Download and install <code>Jarvis-Mark-XLVIII.apk</code> below, then tap <strong>"1-Tap Pair Server to APK"</strong> so your phone listens for <strong>"Jarvis wake up"</strong> even when the app is closed.</div>
         </div>
         <div class="install-step">
           <div class="step-num">2</div>
-          <div class="step-txt">Tap <strong>"Install app"</strong> or <strong>"Add to Home screen"</strong>.</div>
+          <div class="step-txt"><strong>Option B — Chrome PWA:</strong> Tap the Chrome menu (<span class="badge-icon">MENU</span>) and select <strong>"Install app"</strong>.</div>
         </div>
-        <div class="install-step">
-          <div class="step-num">3</div>
-          <div class="step-txt">Confirm installation to deploy JARVIS to your device launcher.</div>
-        </div>
-        <button id="native-install-btn" class="btn btn-send" onclick="triggerNativeInstall()" style="width:100%;margin-top:14px;padding:12px;font-size:12px;display:none;">Deploy Directly Now</button>
+        <button class="btn btn-send" onclick="downloadAndroidApk()" style="width:100%;margin-top:10px;padding:12px;font-size:12px;">1. Download Native JARVIS.apk</button>
+        <button class="btn btn-wake" onclick="pairAndroidApk()" style="width:100%;margin-top:8px;padding:12px;font-size:12px;display:block;">2. 1-Tap Pair Server to Installed APK</button>
+        <button id="native-install-btn" class="btn btn-send" onclick="triggerNativeInstall()" style="width:100%;margin-top:8px;padding:12px;font-size:12px;display:none;">Install Chrome PWA</button>
       </div>
 
       <div id="tab-content-voice" class="tab-content">
         <div class="install-step">
           <div class="step-num">1</div>
-          <div class="step-txt"><strong>In-App Always-Listening:</strong> Keep <span class="badge-icon">WAKE: ARMED</span> active in the top bar. Say <strong>"Jarvis wake up"</strong> or <strong>"Hey Jarvis"</strong> anytime to engage live voice hands-free.</div>
+          <div class="step-txt"><strong>Android 24/7 Background Sentinel:</strong> Install the dedicated <strong>JARVIS.apk</strong> and tap <strong>"1-Tap Pair Server to Installed APK"</strong>. It runs a persistent Android Foreground Service that wakes and opens the HUD whenever you say <strong>"Jarvis wake up"</strong>.</div>
         </div>
         <div class="install-step">
           <div class="step-num">2</div>
-          <div class="step-txt"><strong>Launch When App Is Closed (Phone):</strong> Create an iOS Shortcut or Android Routine named <strong>"Jarvis wake up"</strong> with action <strong>Open URL</strong> set to your Voice Launch URL below.</div>
+          <div class="step-txt"><strong>iOS / Shortcut Deep-Link:</strong> Copy your Voice Launch URL below to trigger JARVIS from iOS Vocal Shortcuts.</div>
         </div>
         <div class="install-step">
           <div class="step-num">3</div>
-          <div class="step-txt"><strong>Launch When App Is Closed (PC):</strong> Run <code>python core/wake_word.py</code> in the background to launch the standalone PWA window whenever you say <strong>"Jarvis wake up"</strong>.</div>
+          <div class="step-txt"><strong>PC Background Daemon:</strong> Run <code>python core/wake_word.py</code> on your PC to launch the standalone window by voice.</div>
         </div>
-        <button class="btn btn-send" onclick="copyVoiceLaunchUrl()" style="width:100%;margin-top:10px;padding:12px;font-size:12px;">Copy Voice Launch URL</button>
+        <button class="btn btn-send" onclick="downloadAndroidApk()" style="width:100%;margin-top:10px;padding:12px;font-size:12px;">Download Native JARVIS.apk (Android)</button>
+        <button class="btn btn-wake" onclick="pairAndroidApk()" style="width:100%;margin-top:8px;padding:12px;font-size:12px;display:block;">1-Tap Pair Server to Installed APK</button>
+        <button class="btn btn-send" onclick="copyVoiceLaunchUrl()" style="width:100%;margin-top:8px;padding:12px;font-size:12px;background:var(--surface);color:var(--accent);border:1px solid var(--border);">Copy Voice Launch URL</button>
       </div>
     </div>
   </div>
@@ -1197,6 +1197,19 @@
       } else {
         prompt('Copy Voice Launch URL:', launchUrl);
       }
+    }
+
+    function downloadAndroidApk() {
+      const apkUrl = 'https://github.com/PetersonMambondimumwe/Jarvis/releases/latest/download/Jarvis-Mark-XLVIII.apk';
+      toast('Downloading Jarvis-Mark-XLVIII.apk…');
+      window.open(apkUrl, '_blank', 'noopener');
+    }
+
+    function pairAndroidApk() {
+      const key = sessionStorage.getItem('jarvis_key') || 'JARVIS';
+      const deepLink = `jarvis://connect?url=${encodeURIComponent(location.origin)}&key=${encodeURIComponent(key)}`;
+      toast('Pairing Server URL with Native JARVIS App…');
+      window.location.href = deepLink;
     }
 
     function triggerNativeInstall() {

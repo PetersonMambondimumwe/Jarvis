@@ -1,0 +1,62 @@
+name: Build Jarvis Android APK
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'android/**'
+      - '.github/workflows/build-android-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build Release APK
+        working-directory: android
+        run: gradle assembleRelease --no-daemon
+
+      - name: Copy APK to Jarvis-Mark-XLVIII.apk
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk Jarvis-Mark-XLVIII.apk
+          ls -lh Jarvis-Mark-XLVIII.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jarvis-Mark-XLVIII-APK
+          path: Jarvis-Mark-XLVIII.apk
+
+      - name: Publish APK to Latest GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v48.1.0"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" Jarvis-Mark-XLVIII.apk --clobber
+          else
+            gh release create "$TAG" Jarvis-Mark-XLVIII.apk \
+              --title "JARVIS Mark XLVIII — Native Android Wake Sentinel APK" \
+              --notes "Dedicated Native Android App (\`Jarvis-Mark-XLVIII.apk\`) with 24/7 Foreground Wake-Word Sentinel (\`\"Jarvis wake up\"\`) and 1-Tap Dokploy Server Pairing." \
+              --latest
+          fi
