@@ -263,17 +263,27 @@ TOOL_DECLARATIONS = [
     {
         "name": "youtube_video",
         "description": (
-            "Controls YouTube. Use for: playing videos, summarizing a video's content, "
-            "getting video info, or showing trending videos."
+            "Plays music and songs on YouTube Music (in the Jarvis PWA player or native YouTube Music app), "
+            "controls music playback (pause, resume, next, previous, stop, volume, open_app), "
+            "summarizes YouTube videos, gets video info, or shows trending videos. "
+            "Always call this tool whenever the user asks to play music, play a song, play an artist, "
+            "or control music playback."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action": {"type": "STRING", "description": "play | summarize | get_info | trending (default: play)"},
-                "query":  {"type": "STRING", "description": "Search query for play action"},
-                "save":   {"type": "BOOLEAN", "description": "Save summary to Notepad (summarize only)"},
-                "region": {"type": "STRING", "description": "Country code for trending e.g. TR, US"},
-                "url":    {"type": "STRING", "description": "Video URL for get_info action"},
+                "action": {
+                    "type": "STRING",
+                    "description": (
+                        "play | pause | resume | next | previous | stop | volume | open_app | summarize | get_info | trending (default: play)"
+                    ),
+                },
+                "query":       {"type": "STRING",  "description": "Song title, artist, album, genre, or video search query for play action"},
+                "open_in_app": {"type": "BOOLEAN", "description": "If True, opens the track directly in the native YouTube Music app"},
+                "volume":      {"type": "INTEGER", "description": "Volume level (0-100) when action='volume'"},
+                "save":        {"type": "BOOLEAN", "description": "Save summary to Notepad (summarize only)"},
+                "region":      {"type": "STRING",  "description": "Country code for trending e.g. ZA, US"},
+                "url":         {"type": "STRING",  "description": "Video URL for get_info action"},
             },
             "required": []
         }
@@ -2035,9 +2045,9 @@ class JarvisLive:
             asyncio.create_task(self._process_dashboard_commands())
             self._dashboard.set_wake_callback(lambda: self.ui.show_window())
 
+            self.ui.dashboard_server = self._dashboard
+
             if getattr(self, "headless", False):
-                if hasattr(self.ui, "dashboard_server"):
-                    self.ui.dashboard_server = self._dashboard
                 master_pin = os.environ.get("JARVIS_PIN", "JARVIS")
                 print("=" * 64)
                 print("  [+] JARVIS REMOTE WEB PORTAL READY")

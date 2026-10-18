@@ -518,9 +518,10 @@ class DashboardServer:
     async def broadcast(self, msg: dict) -> None:
         if msg.get("type") == "status":
             self._current_status = dict(msg)
-        self._history.append(msg)
-        if len(self._history) > 300:
-            self._history = self._history[-300:]
+        if msg.get("type") != "music":
+            self._history.append(msg)
+            if len(self._history) > 300:
+                self._history = self._history[-300:]
         clients = list(self._clients)
         if not clients:
             return
@@ -531,6 +532,25 @@ class DashboardServer:
         dead = {ws for ws, res in zip(clients, results) if isinstance(res, BaseException)}
         if dead:
             self._clients -= dead
+
+    def broadcast_music(self, event: dict) -> None:
+        """Thread-safe helper to broadcast a music playback/control event to all connected PWA clients."""
+        msg = {"type": "music", **event}
+        loop = getattr(self, "_loop", None)
+        if loop is None:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+        if loop and loop.is_running():
+            try:
+                running = asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if running is loop:
+                loop.create_task(self.broadcast(msg))
+            else:
+                asyncio.run_coroutine_threadsafe(self.broadcast(msg), loop)
 
     async def broadcast_audio(self, pcm_chunk: bytes) -> None:
         """Send raw PCM audio chunks in strict serialized order to connected speaker websockets."""
@@ -1138,6 +1158,51 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
             ))
             return JSONResponse({"ok": True})
 
+        # ── YouTube Music Playback & Stream Endpoints ────────────────────────
+
+        @app.post("/api/music/command")
+        async def music_command_ep(req: Request):
+            client_host = (req.client.host if req.client else "") or ""
+            is_local = client_host in ("127.0.0.1", "::1", "localhost")
+            if not is_local and not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            try:
+                body = await req.json()
+            except Exception:
+                return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+            if not isinstance(body, dict):
+                return JSONResponse({"error": "Invalid payload"}, status_code=400)
+
+            event = {"type": "music", **body}
+            await self.broadcast(event)
+            return JSONResponse({"ok": True})
+
+        @app.get("/api/music/search")
+        async def music_search_ep(req: Request, q: str = "", limit: int = 8):
+            if not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            from core.ytmusic_client import search_ytmusic
+
+            tracks = await asyncio.to_thread(search_ytmusic, q, limit)
+            return JSONResponse({"ok": True, "tracks": tracks})
+
+        @app.get("/api/music/stream/{video_id}")
+        async def music_stream_ep(video_id: str, token: str = ""):
+            from fastapi.responses import RedirectResponse
+            from core.ytmusic_client import resolve_audio_stream_url
+
+            tok = token.strip()
+            if not _authorize_ws_token(tok):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+            stream_url = await asyncio.to_thread(resolve_audio_stream_url, video_id)
+            if not stream_url:
+                return JSONResponse(
+                    {"error": "Direct audio stream unavailable; use IFrame or YouTube Music app."},
+                    status_code=404,
+                )
+            return RedirectResponse(url=stream_url, status_code=302)
+
         # ── Phone mic real-time audio → Gemini Live ──────────────────────────
 
         def _authorize_ws_token(tok: str) -> bool:
@@ -1397,9 +1462,10 @@ main{{max-width:420px;padding:28px;text-align:center}}h1{{font-size:22px;color:{
             print("[Dashboard] Run:  pip install fastapi 'uvicorn[standard]' cryptography")
             return
 
+        self._loop = asyncio.get_running_loop()
         # Firewall setup runs in a thread — uvicorn starts immediately,
         # no waiting for UAC dialogs or subprocess timeouts.
-        asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, PORT)
+        self._loop.run_in_executor(None, _ensure_network_access, PORT)
 
         use_ssl  = self._ssl_enabled()
         ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"

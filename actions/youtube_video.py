@@ -279,30 +279,113 @@ def _scrape_trending(region: str = "TR", max_results: int = 8) -> list[dict]:
         return []
 
 def _handle_play(parameters: dict, player) -> str:
+    import os
+    from core.ytmusic_client import broadcast_music_event, search_ytmusic
+
     query = parameters.get("query", "").strip()
     if not query:
-        return "Please tell me what you'd like to watch, sir."
+        return "Please tell me what song, artist, or video you'd like to play, sir."
+
+    open_in_app = bool(parameters.get("open_in_app", False))
 
     if player:
-        player.write_log(f"[YouTube] Searching: {query}")
+        player.write_log(f"[YouTube Music] Searching: {query}")
 
-    print(f"[YouTube] 🔍 Scraping first non-Shorts video for: {query}")
+    print(f"[YouTube Music] 🔍 Searching tracks for: {query}")
+    tracks = search_ytmusic(query, limit=8)
+
+    if tracks:
+        top = tracks[0]
+        title = top.get("title", query)
+        artist = top.get("artist", "YouTube Music")
+        vid = top.get("video_id", "")
+        ytm_url = top.get("ytmusic_url") or f"https://music.youtube.com/watch?v={vid}"
+
+        broadcast_ok = broadcast_music_event(
+            {
+                "action": "open_app" if open_in_app else "play",
+                "query": query,
+                "track": top,
+                "queue": tracks,
+                "open_in_app": open_in_app,
+            },
+            player=player,
+        )
+
+        # If running on a local desktop (not headless Docker) and no remote PWA took the broadcast
+        is_headless = (
+            os.environ.get("HEADLESS") == "1"
+            or os.environ.get("DOCKER") == "1"
+            or getattr(player, "__class__", None).__name__ == "HeadlessUI"
+        )
+        if not is_headless:
+            _open_url(ytm_url)
+
+        if open_in_app:
+            return f"Opening '{title}' by {artist} in YouTube Music ({ytm_url})."
+        return (
+            f"Now playing '{title}' by {artist} on YouTube Music "
+            f"(queued {len(tracks)} tracks; YouTube Music link: {ytm_url})."
+        )
 
     video_url = _scrape_first_video_url(query)
-
     if video_url:
-        print(f"[YouTube] ▶️ Opening: {video_url}")
-        _open_url(video_url)
-        return f"Playing: {query}"
+        vid = _extract_video_id(video_url) or ""
+        ytm_url = f"https://music.youtube.com/watch?v={vid}" if vid else video_url
+        track = {
+            "video_id": vid,
+            "title": query,
+            "artist": "YouTube Music",
+            "album": "",
+            "duration": "",
+            "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg" if vid else "",
+            "ytmusic_url": ytm_url,
+            "watch_url": video_url,
+        }
+        broadcast_music_event(
+            {
+                "action": "open_app" if open_in_app else "play",
+                "query": query,
+                "track": track,
+                "queue": [track],
+                "open_in_app": open_in_app,
+            },
+            player=player,
+        )
+        is_headless = (
+            os.environ.get("HEADLESS") == "1"
+            or os.environ.get("DOCKER") == "1"
+            or getattr(player, "__class__", None).__name__ == "HeadlessUI"
+        )
+        if not is_headless:
+            _open_url(ytm_url)
+        return f"Playing '{query}' on YouTube Music ({ytm_url})."
 
-    print(f"[YouTube] ⚠️ Scrape failed, opening filtered search page")
-    fallback_url = (
-        f"https://www.youtube.com/results"
-        f"?search_query={quote_plus(query)}"
-        f"&sp={_YT_VIDEO_FILTER}"
-    )
-    _open_url(fallback_url)
-    return f"Opened YouTube search for: {query} (manual selection required)"
+    return f"I couldn't find a playable YouTube Music track for '{query}', sir."
+
+
+def _handle_control(action: str, parameters: dict, player) -> str:
+    from core.ytmusic_client import broadcast_music_event
+
+    vol = parameters.get("volume")
+    payload = {"action": action}
+    if vol is not None:
+        try:
+            payload["volume"] = max(0, min(100, int(vol)))
+        except Exception:
+            pass
+
+    broadcast_music_event(payload, player=player)
+    labels = {
+        "pause": "Paused YouTube Music playback.",
+        "resume": "Resumed YouTube Music playback.",
+        "next": "Skipped to the next track on YouTube Music.",
+        "previous": "Returned to the previous track on YouTube Music.",
+        "stop": "Stopped YouTube Music playback.",
+        "volume": f"Set YouTube Music volume to {payload.get('volume', 80)}%.",
+        "open_app": "Opening the current track in the YouTube Music app.",
+    }
+    return labels.get(action, f"Executed YouTube Music action: {action}.")
 
 
 def _handle_summarize(parameters: dict, player, speak) -> str:
@@ -359,6 +442,7 @@ def _handle_get_info(parameters: dict, player, speak) -> str:
     lines = [
         f"{key.capitalize()}: {info[key]}"
         for key in ("title", "channel", "views", "duration", "likes")
+        for _ in [0]
         if key in info
     ]
     result = "\n".join(lines)
@@ -366,7 +450,7 @@ def _handle_get_info(parameters: dict, player, speak) -> str:
 
 
 def _handle_trending(parameters: dict, player, speak) -> str:
-    region = parameters.get("region", "TR").upper()
+    region = parameters.get("region", "ZA").upper()
 
     if player:
         player.write_log(f"[YouTube] Trending: {region}")
@@ -387,6 +471,22 @@ _ACTION_MAP = {
     "trending":  _handle_trending,
 }
 
+_CONTROL_ACTIONS = {
+    "pause": "pause",
+    "resume": "resume",
+    "unpause": "resume",
+    "continue": "resume",
+    "next": "next",
+    "skip": "next",
+    "previous": "previous",
+    "prev": "previous",
+    "back": "previous",
+    "stop": "stop",
+    "volume": "volume",
+    "open_app": "open_app",
+    "open_ytmusic": "open_app",
+}
+
 
 def youtube_video(
     parameters:     dict,
@@ -399,14 +499,20 @@ def youtube_video(
     action = params.get("action", "play").lower().strip()
 
     if player:
-        player.write_log(f"[YouTube] Action: {action}")
-    print(f"[YouTube] ▶️  Action: {action}  Params: {params}")
+        player.write_log(f"[YouTube Music] Action: {action}")
+    print(f"[YouTube Music] ▶️  Action: {action}  Params: {params}")
+
+    if action in _CONTROL_ACTIONS:
+        try:
+            return _handle_control(_CONTROL_ACTIONS[action], params, player)
+        except Exception as e:
+            return f"YouTube Music control '{action}' failed, sir: {e}"
 
     handler = _ACTION_MAP.get(action)
     if handler is None:
         return (
             f"Unknown YouTube action: '{action}'. "
-            "Available: play, summarize, get_info, trending."
+            "Available: play, pause, resume, next, previous, stop, volume, open_app, summarize, get_info, trending."
         )
 
     try:

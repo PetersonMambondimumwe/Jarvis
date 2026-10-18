@@ -31,4 +31,5 @@ chromadb
 PyGithub
 mcp>=1.3.0
 SpeechRecognition
-
+ytmusicapi
+yt-dlp

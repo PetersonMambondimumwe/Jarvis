@@ -1222,5 +1222,65 @@ def linkedin_discard_post(draft_id: str) -> str:
     return linkedin_agent({"action": "discard_post", "draft_id": draft_id})
 
 
+# ── YouTube Music MCP Tools ───────────────────────────────────────────────
+
+@server.tool()
+def ytmusic_play(query: str, open_in_app: bool = False) -> str:
+    """Play a song, artist, album, or genre on YouTube Music in the Jarvis PWA player (or launch the YouTube Music app).
+
+    Parameters:
+      - query: Song title, artist, album, or music vibe to play (e.g. 'Blinding Lights by The Weeknd', 'chill Amapiano mix')
+      - open_in_app: If True, also launches the native YouTube Music app directly on the user's phone/device
+    """
+    from actions.youtube_video import youtube_video
+    return youtube_video({
+        "action": "play",
+        "query": query,
+        "open_in_app": open_in_app,
+    })
+
+
+@server.tool()
+def ytmusic_control(action: str, volume: int = 80) -> str:
+    """Control active YouTube Music playback in Jarvis (pause, resume, next, previous, stop, volume, or open_app).
+
+    Parameters:
+      - action: One of 'pause', 'resume', 'next', 'previous', 'stop', 'volume', or 'open_app' (opens current track in YouTube Music app)
+      - volume: Volume level from 0 to 100 when action='volume' (default: 80)
+    """
+    from actions.youtube_video import youtube_video
+    return youtube_video({
+        "action": action,
+        "volume": volume,
+    })
+
+
+@server.tool()
+def ytmusic_search(query: str, limit: int = 5) -> str:
+    """Search YouTube Music for songs, artists, or albums and return matching tracks with YouTube Music links.
+
+    Parameters:
+      - query: Search query (song title, artist, or album)
+      - limit: Maximum number of results to return (default: 5, max: 10)
+    """
+    from core.ytmusic_client import search_ytmusic
+
+    clean_q = (query or "").strip()
+    if not clean_q:
+        return "[YouTube Music] Please provide a search query."
+    tracks = search_ytmusic(clean_q, limit=max(1, min(int(limit or 5), 10)))
+    if not tracks:
+        return f"[YouTube Music] No tracks found for '{clean_q}'."
+    lines = [f"=== YouTube Music Results for '{clean_q}' ==="]
+    for idx, t in enumerate(tracks, 1):
+        dur = f" ({t['duration']})" if t.get("duration") else ""
+        lines.append(
+            f"{idx}. **{t.get('title', 'Unknown')}** — {t.get('artist', 'YouTube Music')}{dur}\n"
+            f"   Link: {t.get('ytmusic_url', '')}"
+        )
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     asyncio.run(server.run_stdio_async())
+
