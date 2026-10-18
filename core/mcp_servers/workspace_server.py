@@ -836,5 +836,37 @@ def whatsapp_send(
         return f"[WhatsApp] Configuration or delivery error: {exc}"
 
 
+# ── LinkedIn MCP Tools ────────────────────────────────────────────────────
+
+@server.tool()
+def linkedin_status() -> str:
+    """Check whether Jarvis is connected to LinkedIn via OAuth and return the connected profile name."""
+    from actions.linkedin_agent import linkedin_agent
+    return linkedin_agent({"action": "status"})
+
+
+@server.tool()
+def linkedin_prepare_post(content: str) -> str:
+    """Prepare a LinkedIn post draft for user review and return its draft_id before publishing.
+
+    Parameters:
+      - content: The full text of the LinkedIn post (up to 3,000 characters)
+    """
+    from actions.linkedin_agent import linkedin_agent
+    return linkedin_agent({"action": "prepare_post", "content": content})
+
+
+@server.tool()
+def linkedin_publish_post(draft_id: str, confirmed: bool = True) -> str:
+    """Publish a prepared LinkedIn draft after the user approves it.
+
+    Parameters:
+      - draft_id: The draft_id returned by linkedin_prepare_post
+      - confirmed: Must be True to confirm user approval
+    """
+    from actions.linkedin_agent import linkedin_agent
+    return linkedin_agent({"action": "publish_post", "draft_id": draft_id, "confirmed": confirmed})
+
+
 if __name__ == "__main__":
     asyncio.run(server.run_stdio_async())
