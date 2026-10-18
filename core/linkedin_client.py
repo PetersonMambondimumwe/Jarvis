@@ -408,7 +408,372 @@ class LinkedInClient:
                 raise LinkedInError("LinkedIn denied posting; enable Share on LinkedIn for the app")
             message = str(body.get("message") or f"HTTP {response.status_code}")
             raise LinkedInError(f"LinkedIn rejected the post: {message[:200]}")
-        return str(response.headers.get("X-RestLi-Id") or "published")
+        post_id = str(response.headers.get("X-RestLi-Id") or "published")
+        self._record_published_post(
+            post_id=post_id,
+            text=commentary,
+            author_name=str(profile.get("name") or "LinkedIn member"),
+        )
+        return post_id
+
+    @staticmethod
+    def _history_path() -> Path:
+        return _base_dir() / "memory" / "linkedin_published.json"
+
+    def _record_published_post(self, post_id: str, text: str, author_name: str) -> None:
+        path = self._history_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            items: list[dict[str, Any]] = []
+            if path.exists():
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    items = raw
+            items.insert(
+                0,
+                {
+                    "id": post_id,
+                    "author": author_name,
+                    "text": text,
+                    "created_at": int(time.time()),
+                },
+            )
+            path.write_text(json.dumps(items[:100], indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _load_published_history(self, limit: int = 5) -> list[dict[str, Any]]:
+        path = self._history_path()
+        if not path.exists():
+            return []
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, list):
+                return [item for item in raw if isinstance(item, dict)][:limit]
+        except Exception:
+            pass
+        return []
+
+    def _fetch_api_posts(self, limit: int = 5) -> list[dict[str, Any]]:
+        """Attempt to read the authenticated member's posts via LinkedIn v2 ugcPosts / REST posts API."""
+        posts: list[dict[str, Any]] = []
+        try:
+            token = self._valid_token()
+        except Exception:
+            return posts
+
+        profile = token.get("profile") if isinstance(token.get("profile"), dict) else {}
+        member_id = str(profile.get("sub") or "").strip() or self.config.member_id
+        if not member_id:
+            return posts
+        author_urn = member_id if member_id.startswith("urn:li:") else f"urn:li:person:{member_id}"
+        author_name = str(profile.get("name") or "You")
+        headers = {
+            "Authorization": f"Bearer {token['access_token']}",
+            "Accept": "application/json",
+            "X-Restli-Protocol-Version": "2.0.0",
+        }
+
+        # 1. Try v2 ugcPosts by author
+        try:
+            from urllib.parse import quote
+            encoded_urn = quote(author_urn, safe="")
+            url = f"{UGC_POSTS_URL}?q=authors&authors=List({encoded_urn})&count={limit}"
+            resp = self.session.get(url, headers=headers, timeout=self.config.timeout)
+            if resp.status_code == 200:
+                body = self._json(resp)
+                for el in body.get("elements", []) or []:
+                    if not isinstance(el, dict):
+                        continue
+                    spec = el.get("specificContent", {})
+                    share = spec.get("com.linkedin.ugc.ShareContent", {}) if isinstance(spec, dict) else {}
+                    comm = share.get("shareCommentary", {}) if isinstance(share, dict) else {}
+                    txt = str(comm.get("text") or "").strip()
+                    if txt:
+                        created_ms = (el.get("created") or {}).get("time") or 0
+                        posts.append({
+                            "id": str(el.get("id") or ""),
+                            "author": author_name,
+                            "text": txt,
+                            "created_at": int(created_ms / 1000) if created_ms else 0,
+                        })
+        except Exception:
+            pass
+
+        if posts:
+            return posts[:limit]
+
+        # 2. Try REST Posts API
+        try:
+            from urllib.parse import quote
+            encoded_urn = quote(author_urn, safe="")
+            rest_url = f"https://api.linkedin.com/rest/posts?author={encoded_urn}&q=author&count={limit}"
+            rest_headers = {**headers, "LinkedIn-Version": "202405"}
+            resp = self.session.get(rest_url, headers=rest_headers, timeout=self.config.timeout)
+            if resp.status_code == 200:
+                body = self._json(resp)
+                for el in body.get("elements", []) or []:
+                    if not isinstance(el, dict):
+                        continue
+                    txt = str(el.get("commentary") or "").strip()
+                    if txt:
+                        created_ms = el.get("createdAt") or 0
+                        posts.append({
+                            "id": str(el.get("id") or ""),
+                            "author": author_name,
+                            "text": txt,
+                            "created_at": int(created_ms / 1000) if created_ms else 0,
+                        })
+        except Exception:
+            pass
+
+        return posts[:limit]
+
+    def _extract_public_post_url(self, url: str) -> Optional[dict[str, str]]:
+        """Extract author, title, and full commentary text from a public LinkedIn post URL."""
+        import html as _html
+        import re as _re
+
+        clean_url = url.strip()
+        if not clean_url.startswith("http"):
+            return None
+
+        ua_headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        try:
+            resp = self.session.get(clean_url, headers=ua_headers, timeout=12)
+            if resp.status_code == 200 and resp.text:
+                raw_html = resp.text
+                # Check JSON-LD first for full articleBody / text
+                for m in _re.finditer(
+                    r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                    raw_html,
+                    flags=_re.DOTALL | _re.IGNORECASE,
+                ):
+                    try:
+                        ld = json.loads(m.group(1).strip())
+                        items = ld if isinstance(ld, list) else [ld]
+                        for item in items:
+                            if not isinstance(item, dict):
+                                continue
+                            body_txt = str(
+                                item.get("articleBody")
+                                or item.get("text")
+                                or item.get("description")
+                                or ""
+                            ).strip()
+                            author_obj = item.get("author")
+                            author_name = ""
+                            if isinstance(author_obj, dict):
+                                author_name = str(author_obj.get("name") or "")
+                            elif isinstance(author_obj, str):
+                                author_name = author_obj
+                            if body_txt and len(body_txt) > 25:
+                                return {
+                                    "author": _html.unescape(author_name or "LinkedIn Author"),
+                                    "text": _html.unescape(body_txt),
+                                    "url": clean_url,
+                                }
+                    except Exception:
+                        pass
+
+                # Fallback to OpenGraph description & title
+                og_desc = _re.search(
+                    r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']',
+                    raw_html,
+                    flags=_re.IGNORECASE,
+                ) or _re.search(
+                    r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:description["\']',
+                    raw_html,
+                    flags=_re.IGNORECASE,
+                )
+                og_title = _re.search(
+                    r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
+                    raw_html,
+                    flags=_re.IGNORECASE,
+                )
+                if og_desc:
+                    txt = _html.unescape(og_desc.group(1)).strip()
+                    title = _html.unescape(og_title.group(1)).strip() if og_title else "LinkedIn Post"
+                    if txt:
+                        return {"author": title, "text": txt, "url": clean_url}
+        except Exception:
+            pass
+        return None
+
+    def _search_public_linkedin_posts(self, query: str, limit: int = 5) -> list[dict[str, str]]:
+        """Search public LinkedIn posts by topic, person, or company and extract post content."""
+        import html as _html
+        import re as _re
+
+        results: list[dict[str, str]] = []
+        search_q = f"site:linkedin.com/posts {query}".strip()
+
+        # 1. Try Tavily API if configured for rich content snippets
+        env_vars = _get_all_env_vars()
+        cfg_vars = _get_all_config_vars()
+        tavily_key = (
+            os.environ.get("TAVILY_API_KEY")
+            or env_vars.get("TAVILY_API_KEY")
+            or str(cfg_vars.get("tavily_api_key") or "")
+        ).strip()
+        if tavily_key:
+            try:
+                r = self.session.post(
+                    "https://api.tavily.com/search",
+                    json={
+                        "api_key": tavily_key,
+                        "query": search_q,
+                        "max_results": limit,
+                        "include_raw_content": False,
+                    },
+                    timeout=12,
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    for item in data.get("results", [])[:limit]:
+                        url = str(item.get("url") or "")
+                        title = str(item.get("title") or "LinkedIn Post")
+                        snippet = str(item.get("content") or "").strip()
+                        extracted = self._extract_public_post_url(url) if url else None
+                        results.append({
+                            "author": (extracted or {}).get("author") or title,
+                            "text": (extracted or {}).get("text") or snippet,
+                            "url": url,
+                        })
+                    if results:
+                        return results
+            except Exception:
+                pass
+
+        # 2. Fallback to DuckDuckGo HTML search for site:linkedin.com/posts
+        try:
+            ddg_resp = self.session.post(
+                "https://html.duckduckgo.com/html/",
+                data={"q": search_q},
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                    )
+                },
+                timeout=12,
+            )
+            if ddg_resp.status_code == 200:
+                blocks = _re.findall(
+                    r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?'
+                    r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
+                    ddg_resp.text,
+                    flags=_re.DOTALL,
+                )
+                for href, raw_title, raw_snip in blocks[:limit]:
+                    clean_title = _html.unescape(_re.sub(r"<[^>]+>", "", raw_title)).strip()
+                    clean_snip = _html.unescape(_re.sub(r"<[^>]+>", "", raw_snip)).strip()
+                    extracted = self._extract_public_post_url(href) if "linkedin.com/" in href else None
+                    results.append({
+                        "author": (extracted or {}).get("author") or clean_title,
+                        "text": (extracted or {}).get("text") or clean_snip,
+                        "url": href,
+                    })
+        except Exception:
+            pass
+
+        return results[:limit]
+
+    def read_posts(self, query: str = "", post_url: str = "", limit: int = 5) -> str:
+        """Read LinkedIn posts: supports reading a specific post URL, the user's own posts, or posts by topic/author."""
+        limit = max(1, min(int(limit or 5), 15))
+        q = (query or "").strip()
+        target_url = (post_url or "").strip()
+        if not target_url and ("linkedin.com/posts/" in q or "linkedin.com/feed/update/" in q or "linkedin.com/pulse/" in q):
+            target_url = q
+
+        # Case 1: Specific LinkedIn post URL
+        if target_url:
+            extracted = self._extract_public_post_url(target_url)
+            if extracted and extracted.get("text"):
+                return (
+                    f"**LinkedIn Post — {extracted.get('author', 'LinkedIn')}**\n"
+                    f"URL: {extracted.get('url', target_url)}\n\n"
+                    f"{extracted['text']}"
+                )
+            return f"Could not extract public text from LinkedIn URL: {target_url}"
+
+        # Case 2: User's own posts (empty query, 'me', 'my posts', 'mine')
+        is_self_query = not q or q.lower() in {"me", "my", "mine", "my posts", "own", "self", "latest", "recent"}
+        if is_self_query:
+            api_posts = self._fetch_api_posts(limit=limit)
+            local_posts = self._load_published_history(limit=limit)
+
+            # Merge deduplicated by post ID or text prefix
+            merged: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            for item in [*api_posts, *local_posts]:
+                txt = str(item.get("text") or "").strip()
+                if not txt:
+                    continue
+                key = txt[:120].lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(item)
+
+            if merged:
+                lines = [f"=== Your Recent LinkedIn Posts ({len(merged[:limit])}) ===\n"]
+                for idx, p in enumerate(merged[:limit], 1):
+                    ts = int(p.get("created_at") or 0)
+                    date_str = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts else "Recent"
+                    pid = str(p.get("id") or "")
+                    id_tag = f" (ID: `{pid}`)" if pid else ""
+                    lines.append(f"{idx}. **{p.get('author', 'You')}** — {date_str}{id_tag}\n{p['text']}\n")
+                return "\n".join(lines).strip()
+
+            # If no local or API posts were returned, try searching public posts under connected profile name
+            try:
+                st = self.status()
+                profile_name = str(st.get("name") or "").strip()
+                if profile_name and profile_name.lower() != "linkedin member":
+                    pub = self._search_public_linkedin_posts(profile_name, limit=limit)
+                    if pub:
+                        lines = [f"=== LinkedIn Posts for {profile_name} ===\n"]
+                        for idx, item in enumerate(pub, 1):
+                            lines.append(
+                                f"{idx}. **{item.get('author', profile_name)}**\n"
+                                f"{item.get('text', '')}\n"
+                                f"URL: {item.get('url', '')}\n"
+                            )
+                        return "\n".join(lines).strip()
+            except Exception:
+                pass
+
+            return (
+                "No recent LinkedIn posts were found in your Jarvis publish history, and LinkedIn's API "
+                "did not return any authored posts (note: LinkedIn restricts reading member feed history "
+                "unless Marketing Developer Platform 'r_member_social' is enabled on your LinkedIn app). "
+                "You can also pass a topic, person, company name, or post URL to read public LinkedIn posts."
+            )
+
+        # Case 3: Search and read LinkedIn posts by topic, person, or company
+        found = self._search_public_linkedin_posts(q, limit=limit)
+        if not found:
+            return f"No public LinkedIn posts found matching '{q}'."
+
+        lines = [f"=== LinkedIn Posts Matching '{q}' ({len(found)}) ===\n"]
+        for idx, item in enumerate(found, 1):
+            text_body = item.get("text") or "(No text preview available)"
+            if len(text_body) > 1200:
+                text_body = text_body[:1200] + "…"
+            lines.append(
+                f"{idx}. **{item.get('author', 'LinkedIn Post')}**\n"
+                f"{text_body}\n"
+                f"URL: {item.get('url', '')}\n"
+            )
+        return "\n".join(lines).strip()
 
     def disconnect(self) -> None:
         self.store.clear()

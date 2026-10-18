@@ -805,16 +805,30 @@ TOOL_DECLARATIONS = [
     {
         "name": "linkedin_agent",
         "description": (
-            "Manages Jarvis's authorized LinkedIn account. Checks connection status and prepares, "
-            "publishes, or discards text-post drafts. Preparing never publishes. Publishing requires "
-            "the user to explicitly approve the exact prepared draft first."
+            "Manages Jarvis's authorized LinkedIn account and reads LinkedIn posts. "
+            "Supports checking connection status, reading LinkedIn posts (your own recent posts, "
+            "a specific LinkedIn post URL, or posts by topic/person/company), and preparing, "
+            "listing, publishing, or discarding text-post drafts. Preparing never publishes. "
+            "Publishing requires the user to explicitly approve the exact prepared draft first."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
                 "action": {
                     "type": "STRING",
-                    "description": "status | prepare_post | publish_post | discard_post"
+                    "description": "status | read_posts | prepare_post | publish_post | list_drafts | discard_post"
+                },
+                "query": {
+                    "type": "STRING",
+                    "description": "For read_posts: 'me' (default, user's own posts), or a person, company, or topic to read LinkedIn posts about."
+                },
+                "post_url": {
+                    "type": "STRING",
+                    "description": "For read_posts: optional direct LinkedIn post URL to read."
+                },
+                "limit": {
+                    "type": "INTEGER",
+                    "description": "For read_posts: max number of posts to read (default 5)."
                 },
                 "content": {
                     "type": "STRING",

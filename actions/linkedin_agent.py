@@ -42,12 +42,25 @@ def linkedin_agent(parameters: dict, **kwargs) -> str:
     action = str(params.get("action") or "status").strip().lower()
     if action in {"verify", "check"}:
         action = "status"
-    if action in {"draft", "prepare"}:
+    elif action in {"draft", "prepare"}:
         action = "prepare_post"
-    if action in {"publish", "post"}:
+    elif action in {"publish", "post"}:
         action = "publish_post"
+    elif action in {"read", "read_post", "read_posts", "list_posts", "get_posts", "feed", "search_posts"}:
+        action = "read_posts"
+    elif action in {"drafts", "list_drafts"}:
+        action = "list_drafts"
 
     try:
+        if action == "list_drafts":
+            drafts = _load_drafts()
+            if not drafts:
+                return "There are no active LinkedIn post drafts."
+            lines = [f"=== Active LinkedIn Drafts ({len(drafts)}) ===\n"]
+            for d_id, d_val in drafts.items():
+                lines.append(f"• Draft ID `{d_id}`:\n{d_val.get('content', '')}\n")
+            return "\n".join(lines).strip()
+
         client = _client()
         if action == "status":
             status = client.status()
@@ -56,6 +69,15 @@ def linkedin_agent(parameters: dict, **kwargs) -> str:
             if status.get("reason") == "expired":
                 return "LinkedIn authorization has expired. Reconnect it from the Jarvis dashboard."
             return "LinkedIn is configured but not connected. Use the LinkedIn button in the Jarvis dashboard."
+
+        if action == "read_posts":
+            query = str(params.get("query") or params.get("content") or "").strip()
+            post_url = str(params.get("post_url") or params.get("url") or "").strip()
+            try:
+                limit = int(params.get("limit") or 5)
+            except (TypeError, ValueError):
+                limit = 5
+            return client.read_posts(query=query, post_url=post_url, limit=limit)
 
         if action == "prepare_post":
             content = str(params.get("content") or "").strip()
@@ -97,7 +119,7 @@ def linkedin_agent(parameters: dict, **kwargs) -> str:
             _save_drafts(drafts)
             return f"LinkedIn post published successfully. Post ID: {post_id}."
 
-        return "LinkedIn supports status, prepare_post, publish_post, and discard_post."
+        return "LinkedIn supports status, read_posts, prepare_post, publish_post, list_drafts, and discard_post."
     except LinkedInError as exc:
         return f"LinkedIn could not complete that request: {exc}."
     except Exception:

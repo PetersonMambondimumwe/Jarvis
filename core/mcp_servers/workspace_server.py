@@ -204,7 +204,7 @@ def _extract_email_body(msg: email.message.Message) -> str:
     return "(No readable text content)"
 
 
-def _open_imap(folder: str = "INBOX") -> imaplib.IMAP4_SSL:
+def _open_imap(folder: str = "INBOX", readonly: bool = True) -> imaplib.IMAP4_SSL:
     creds = _resolve_email_credentials()
     if not creds["imap_email"] or not creds["imap_password"]:
         raise RuntimeError(
@@ -213,11 +213,46 @@ def _open_imap(folder: str = "INBOX") -> imaplib.IMAP4_SSL:
         )
     conn = imaplib.IMAP4_SSL(creds["imap_host"], creds["imap_port"], timeout=20)
     conn.login(creds["imap_email"], creds["imap_password"])
-    status, _ = conn.select(folder or "INBOX", readonly=True)
-    if status != "OK":
-        conn.logout()
-        raise RuntimeError(f"Could not select IMAP folder '{folder}'.")
+    if folder:
+        target_folder = f'"{folder}"' if " " in folder and not folder.startswith('"') else folder
+        status, _ = conn.select(target_folder, readonly=readonly)
+        if status != "OK":
+            conn.logout()
+            raise RuntimeError(f"Could not select IMAP folder '{folder}'.")
     return conn
+
+
+def _find_imap_special_folder(
+    conn: imaplib.IMAP4_SSL,
+    special_use_flag: str,
+    candidates: list[str],
+) -> Optional[str]:
+    """Locate an IMAP special-use folder (e.g. '\\Drafts' or '\\Trash') via LIST or fallback names."""
+    try:
+        st, folders = conn.list()
+        if st == "OK" and folders:
+            parsed_names: list[str] = []
+            for raw_item in folders:
+                if not isinstance(raw_item, bytes):
+                    continue
+                line = raw_item.decode("utf-8", errors="replace")
+                # Match RFC 6154 special-use attribute e.g. \Drafts or \Trash
+                m = re.search(r'\(([^)]*)\)\s+"[^"]*"\s+("?[^"]+"?)$', line)
+                if not m:
+                    continue
+                flags_str, folder_raw = m.group(1), m.group(2).strip().strip('"')
+                parsed_names.append(folder_raw)
+                if special_use_flag.lower() in flags_str.lower():
+                    return f'"{folder_raw}"' if " " in folder_raw else folder_raw
+
+            lower_map = {n.lower(): n for n in parsed_names}
+            for cand in candidates:
+                if cand.lower() in lower_map:
+                    matched = lower_map[cand.lower()]
+                    return f'"{matched}"' if " " in matched else matched
+    except Exception:
+        pass
+    return None
 
 
 # ── GitHub MCP Tools ──────────────────────────────────────────────────────
@@ -775,6 +810,291 @@ def email_reply(
         return f"[Email] Failed to send reply: {exc}"
 
 
+@server.tool()
+def email_save_draft(
+    to: str = "",
+    subject: str = "",
+    body: str = "",
+    recipient_name: str = "",
+    cc: str = "",
+    bcc: str = "",
+    sender_name: str = "Jarvis",
+) -> str:
+    """Save an email as a draft in the user's mailbox Drafts folder via IMAP (and persist a local backup).
+
+    Parameters:
+      - to: Optional recipient email address (or comma-separated addresses)
+      - subject: Email subject line
+      - body: Email body text
+      - recipient_name: Optional recipient name for greeting (e.g. 'Dr. Smith')
+      - cc: Optional comma-separated CC email addresses
+      - bcc: Optional comma-separated BCC email addresses
+      - sender_name: Display name for sender (default: 'Jarvis')
+    """
+    import time as _time
+    import uuid as _uuid
+
+    if not body.strip() and not subject.strip():
+        return "[Email] Error: Please provide at least a 'subject' or 'body' to save as a draft."
+
+    creds = _resolve_email_credentials()
+    subj = subject.strip() or "(No Subject)"
+    to_clean = to.strip()
+    draft_id = _uuid.uuid4().hex[:8]
+
+    # Always save to local drafts registry as backup / quick reference
+    local_drafts_file = BASE_DIR / "memory" / "email_drafts.json"
+    try:
+        local_drafts_file.parent.mkdir(parents=True, exist_ok=True)
+        existing_drafts: list[dict[str, Any]] = []
+        if local_drafts_file.exists():
+            raw = json.loads(local_drafts_file.read_text(encoding="utf-8"))
+            if isinstance(raw, list):
+                existing_drafts = raw
+        existing_drafts.insert(
+            0,
+            {
+                "draft_id": draft_id,
+                "to": to_clean,
+                "cc": cc.strip(),
+                "bcc": bcc.strip(),
+                "subject": subj,
+                "body": body,
+                "created_at": int(_time.time()),
+            },
+        )
+        local_drafts_file.write_text(json.dumps(existing_drafts[:50], indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    if not creds["imap_email"] or not creds["imap_password"]:
+        return (
+            f"✅ Email draft `{draft_id}` saved locally (To: {to_clean or 'unassigned'}, "
+            f"Subject: \"{subj}\"). Configure IMAP credentials to sync directly with your mailbox Drafts folder."
+        )
+
+    try:
+        html_body = _EMAIL_HTML_TEMPLATE.format(
+            name=recipient_name.strip() or "there",
+            message=body.replace("\n", "<br>"),
+            sender_name=sender_name,
+        )
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subj
+        msg["From"] = f"{sender_name} <{creds['imap_email']}>"
+        if to_clean:
+            msg["To"] = to_clean
+        if cc.strip():
+            msg["Cc"] = cc.strip()
+        if bcc.strip():
+            msg["Bcc"] = bcc.strip()
+        msg["Date"] = email.utils.formatdate(localtime=True)
+        msg["Message-ID"] = email.utils.make_msgid()
+
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+        raw_bytes = msg.as_bytes()
+
+        conn = _open_imap(folder="", readonly=False)
+        try:
+            draft_folder = _find_imap_special_folder(
+                conn,
+                "\\Drafts",
+                ["[Gmail]/Drafts", "Drafts", "INBOX.Drafts", "Draft"],
+            )
+            candidates = (
+                [draft_folder] if draft_folder else []
+            ) + ['"[Gmail]/Drafts"', "Drafts", "INBOX.Drafts"]
+            saved_folder = None
+            for folder_name in candidates:
+                if not folder_name:
+                    continue
+                try:
+                    st, _ = conn.append(
+                        folder_name,
+                        "(\\Draft \\Seen)",
+                        imaplib.Time2Internaldate(_time.time()),
+                        raw_bytes,
+                    )
+                    if st == "OK":
+                        saved_folder = folder_name.strip('"')
+                        break
+                except Exception:
+                    continue
+
+            if saved_folder:
+                return (
+                    f"✅ Email saved to your '{saved_folder}' mailbox folder "
+                    f"(To: {to_clean or 'unassigned'}, Subject: \"{subj}\", Draft ID: `{draft_id}`)."
+                )
+            return (
+                f"✅ Email draft `{draft_id}` saved locally (Subject: \"{subj}\"), "
+                "but the remote IMAP Drafts folder could not be written to."
+            )
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+    except Exception as exc:
+        return f"✅ Email draft `{draft_id}` saved locally (IMAP sync error: {exc})."
+
+
+@server.tool()
+def email_list_drafts(limit: int = 10) -> str:
+    """List saved email drafts from the user's IMAP Drafts folder and local draft storage.
+
+    Parameters:
+      - limit: Maximum number of drafts to list (default: 10, max: 25)
+    """
+    limit = max(1, min(int(limit or 10), 25))
+    lines: list[str] = []
+
+    try:
+        conn = _open_imap(folder="", readonly=True)
+        try:
+            draft_folder = _find_imap_special_folder(
+                conn,
+                "\\Drafts",
+                ["[Gmail]/Drafts", "Drafts", "INBOX.Drafts", "Draft"],
+            ) or "Drafts"
+            st, _ = conn.select(draft_folder, readonly=True)
+            if st == "OK":
+                st_s, data = conn.uid("search", None, "ALL")
+                if st_s == "OK" and data and data[0]:
+                    uids = list(reversed(data[0].split()[-limit:]))
+                    lines.append(f"=== Mailbox Drafts ({draft_folder.strip('\"')}: {len(uids)}) ===")
+                    for uid_b in uids:
+                        uid_s = uid_b.decode("ascii", errors="replace")
+                        st_f, msg_data = conn.uid("fetch", uid_b, "(BODY.PEEK[])")
+                        if st_f != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
+                            continue
+                        msg_obj = email.message_from_bytes(msg_data[0][1])
+                        subj = _decode_mime_header(msg_obj.get("Subject")) or "(No Subject)"
+                        to_hdr = _decode_mime_header(msg_obj.get("To")) or "(No recipient)"
+                        date_str = _decode_mime_header(msg_obj.get("Date")) or ""
+                        snippet = re.sub(r"\s+", " ", _extract_email_body(msg_obj)).strip()[:200]
+                        lines.append(
+                            f"• UID `{uid_s}` — **{subj}**\n"
+                            f"  To: {to_hdr} | Date: {date_str}\n"
+                            f"  Preview: {snippet}"
+                        )
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    local_drafts_file = BASE_DIR / "memory" / "email_drafts.json"
+    if local_drafts_file.exists():
+        try:
+            raw = json.loads(local_drafts_file.read_text(encoding="utf-8"))
+            if isinstance(raw, list) and raw:
+                lines.append("\n=== Local Jarvis Drafts ===")
+                for item in raw[:limit]:
+                    if not isinstance(item, dict):
+                        continue
+                    lines.append(
+                        f"• Draft `{item.get('draft_id', '')}` — **{item.get('subject', '(No Subject)')}**\n"
+                        f"  To: {item.get('to') or '(No recipient)'}\n"
+                        f"  Body: {str(item.get('body') or '')[:200]}"
+                    )
+        except Exception:
+            pass
+
+    if not lines:
+        return "No saved email drafts found."
+    return "\n".join(lines)
+
+
+@server.tool()
+def email_delete(
+    email_id: str = "latest",
+    query: str = "",
+    folder: str = "INBOX",
+    permanent: bool = False,
+) -> str:
+    """Delete an email from the user's mailbox by UID, 'latest', or search query (moves to Trash by default).
+
+    Parameters:
+      - email_id: UID of the email to delete (from email_list_inbox / email_search), or 'latest' for the newest email
+      - query: Optional sender/subject search query to locate the email to delete if email_id is not a numeric UID
+      - folder: Mailbox folder containing the email (default: 'INBOX')
+      - permanent: If True, permanently expunge without copying to Trash; if False (default), move to Trash/Bin first
+    """
+    try:
+        conn = _open_imap(folder=folder, readonly=False)
+        try:
+            uid_bytes: Optional[bytes] = None
+            clean_q = (query or "").strip()
+            clean_id = (email_id or "").strip()
+
+            # If a search query was passed (or email_id looks like a search phrase rather than a UID / 'latest')
+            if clean_q or (clean_id and not clean_id.isdigit() and clean_id.lower() not in ("latest", "last", "newest", "recent")):
+                search_term = (clean_q or clean_id).replace('"', "")
+                st, data = conn.uid(
+                    "search",
+                    None,
+                    f'(OR SUBJECT "{search_term}" (OR FROM "{search_term}" TEXT "{search_term}"))',
+                )
+                if st == "OK" and data and data[0]:
+                    matches = data[0].split()
+                    uid_bytes = matches[-1] if matches else None
+                if not uid_bytes:
+                    return f"[Email] No email found matching '{search_term}' in {folder}."
+            else:
+                uid_bytes = _resolve_uid_bytes(conn, clean_id or "latest", unread_only=False)
+
+            if not uid_bytes:
+                return f"[Email] No email found to delete in {folder}."
+
+            uid_str = uid_bytes.decode("ascii", errors="replace")
+
+            # Fetch Subject and From before deleting so Jarvis can confirm the exact message deleted
+            subj = "(No Subject)"
+            sender = "Unknown"
+            st_f, msg_data = conn.uid("fetch", uid_bytes, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")
+            if st_f == "OK" and msg_data and isinstance(msg_data[0], tuple):
+                hdr_msg = email.message_from_bytes(msg_data[0][1])
+                subj = _decode_mime_header(hdr_msg.get("Subject")) or "(No Subject)"
+                sender = _decode_mime_header(hdr_msg.get("From")) or "Unknown"
+
+            moved_to_trash = False
+            if not permanent:
+                trash_folder = _find_imap_special_folder(
+                    conn,
+                    "\\Trash",
+                    ["[Gmail]/Trash", "[Gmail]/Bin", "Trash", "Deleted Items", "Deleted Messages", "Bin"],
+                )
+                if trash_folder and trash_folder.strip('"').lower() != folder.strip('"').lower():
+                    try:
+                        cp_st, _ = conn.uid("copy", uid_bytes, trash_folder)
+                        if cp_st == "OK":
+                            moved_to_trash = True
+                    except Exception:
+                        pass
+
+            st_del, _ = conn.uid("store", uid_bytes, "+FLAGS", "(\\Deleted)")
+            if st_del != "OK":
+                return f"[Email] Server rejected deletion for email ID `{uid_str}` (Subject: \"{subj}\")."
+            conn.expunge()
+
+            action_desc = "moved to Trash and removed" if moved_to_trash else "permanently deleted"
+            return (
+                f"✅ Email ID `{uid_str}` {action_desc} from {folder} — "
+                f"**{subj}** (From: {sender})."
+            )
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+    except Exception as exc:
+        return f"[Email] Failed to delete email: {exc}"
+
+
 # ── WhatsApp Cloud API MCP Tool (jarvis_notification Template) ────────────
 
 @server.tool()
@@ -846,6 +1166,28 @@ def linkedin_status() -> str:
 
 
 @server.tool()
+def linkedin_read_posts(
+    query: str = "me",
+    post_url: str = "",
+    limit: int = 5,
+) -> str:
+    """Read LinkedIn posts: read the user's own recent LinkedIn posts, read a specific LinkedIn post URL, or search/read LinkedIn posts by a person, company, or topic.
+
+    Parameters:
+      - query: Pass 'me' (default) to read the user's own recent posts, or pass a person's name, company name, or topic (e.g. 'AI agents', 'Satya Nadella')
+      - post_url: Optional direct URL to a LinkedIn post (e.g. 'https://www.linkedin.com/posts/...') to read its full text
+      - limit: Maximum number of posts to read (default: 5, max: 15)
+    """
+    from actions.linkedin_agent import linkedin_agent
+    return linkedin_agent({
+        "action": "read_posts",
+        "query": query,
+        "post_url": post_url,
+        "limit": limit,
+    })
+
+
+@server.tool()
 def linkedin_prepare_post(content: str) -> str:
     """Prepare a LinkedIn post draft for user review and return its draft_id before publishing.
 
@@ -866,6 +1208,17 @@ def linkedin_publish_post(draft_id: str, confirmed: bool = True) -> str:
     """
     from actions.linkedin_agent import linkedin_agent
     return linkedin_agent({"action": "publish_post", "draft_id": draft_id, "confirmed": confirmed})
+
+
+@server.tool()
+def linkedin_discard_post(draft_id: str) -> str:
+    """Discard a prepared LinkedIn post draft by its draft_id.
+
+    Parameters:
+      - draft_id: The draft_id returned by linkedin_prepare_post
+    """
+    from actions.linkedin_agent import linkedin_agent
+    return linkedin_agent({"action": "discard_post", "draft_id": draft_id})
 
 
 if __name__ == "__main__":
