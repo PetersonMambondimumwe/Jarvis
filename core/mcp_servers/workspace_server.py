@@ -963,7 +963,8 @@ def email_list_drafts(limit: int = 10) -> str:
                 st_s, data = conn.uid("search", None, "ALL")
                 if st_s == "OK" and data and data[0]:
                     uids = list(reversed(data[0].split()[-limit:]))
-                    lines.append(f"=== Mailbox Drafts ({draft_folder.strip('\"')}: {len(uids)}) ===")
+                    clean_draft_folder = draft_folder.strip('"')
+                    lines.append(f"=== Mailbox Drafts ({clean_draft_folder}: {len(uids)}) ===")
                     for uid_b in uids:
                         uid_s = uid_b.decode("ascii", errors="replace")
                         st_f, msg_data = conn.uid("fetch", uid_b, "(BODY.PEEK[])")
